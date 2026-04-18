@@ -130,7 +130,9 @@ export default function App() {
   }, []);
 
   const results = toolOutput.listings ?? [];
-  const extractedHardFilters = toolOutput.meta?.extracted_hard_filters;
+  const extractedHardFilters =
+    toolOutput.meta?.effective_hard_filters ?? toolOutput.meta?.extracted_hard_filters ?? {};
+  const extractedSoftFilters = toolOutput.meta?.effective_soft_filters ?? {};
   const hasToolResults = results.length > 0;
   const shouldShowNoResultsWarning =
     mode === "browser" && !isLoading && !errorMessage && query.trim() === "" && !results.length;
@@ -277,14 +279,21 @@ export default function App() {
 
             <div className="filters-panel">
               <div className="filters-header">
-                <h2>Extracted hard filters</h2>
+                <h2>Extracted filters</h2>
                 <span className="muted">
                   {hasToolResults ? "From latest search" : "Will appear after search"}
                 </span>
               </div>
-              <pre className="filters-code">
-                {JSON.stringify(extractedHardFilters ?? {}, null, 2)}
-              </pre>
+              <div className="filters-sections">
+                <section className="filter-section">
+                  <div className="filter-section-header">Hard filters</div>
+                  <pre className="filters-code">{JSON.stringify(extractedHardFilters, null, 2)}</pre>
+                </section>
+                <section className="filter-section">
+                  <div className="filter-section-header">Soft filters</div>
+                  <pre className="filters-code">{JSON.stringify(extractedSoftFilters, null, 2)}</pre>
+                </section>
+              </div>
             </div>
           </section>
 
@@ -318,7 +327,9 @@ export default function App() {
 }
 
 function buildAssistantSummary(payload: ToolOutput): string {
-  const extractedHardFilters = payload.meta?.extracted_hard_filters ?? {};
+  const extractedHardFilters =
+    payload.meta?.effective_hard_filters ?? payload.meta?.extracted_hard_filters ?? {};
+  const extractedSoftFilters = payload.meta?.effective_soft_filters ?? {};
   const resultCount = Array.isArray(payload.listings) ? payload.listings.length : 0;
-  return `Previous hard filters: ${JSON.stringify(extractedHardFilters)}. Returned ${resultCount} listings.`;
+  return `Previous hard filters: ${JSON.stringify(extractedHardFilters)}. Previous soft filters: ${JSON.stringify(extractedSoftFilters)}. Returned ${resultCount} listings.`;
 }

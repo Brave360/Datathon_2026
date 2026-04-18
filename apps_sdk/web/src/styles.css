@@ -234,6 +234,26 @@ body {
   overflow: hidden;
 }
 
+.filters-sections {
+  display: grid;
+  gap: 1px;
+  background: rgba(22, 36, 52, 0.08);
+}
+
+.filter-section {
+  background: rgba(247, 250, 252, 0.96);
+}
+
+.filter-section-header {
+  padding: 10px 14px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #476174;
+  border-bottom: 1px solid rgba(22, 36, 52, 0.08);
+}
+
 .filters-header {
   display: flex;
   justify-content: space-between;
@@ -264,7 +284,7 @@ body {
 .filters-code {
   margin: 0;
   padding: 14px;
-  max-height: 180px;
+  max-height: 220px;
   overflow: auto;
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 0.76rem;
