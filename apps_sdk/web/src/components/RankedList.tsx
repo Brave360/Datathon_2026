@@ -23,6 +23,8 @@ type RankedListProps = {
   results: RankedListingResult[];
   selectedId: string | null;
   onSelect: (listingId: string) => void;
+  emptyTitle?: string;
+  emptyMessage?: string;
 };
 
 function formatPrice(price?: number | null): string {
@@ -47,6 +49,8 @@ export default function RankedList({
   results,
   selectedId,
   onSelect,
+  emptyTitle = "No results yet.",
+  emptyMessage = "Run a search to render the map and list.",
 }: RankedListProps) {
   const [imageIndexes, setImageIndexes] = useState<Record<string, number>>({});
   const touchStartXRef = useRef<Record<string, number>>({});
@@ -54,8 +58,8 @@ export default function RankedList({
   if (!results.length) {
     return (
       <div className="empty-state">
-        <p>No widget data yet.</p>
-        <p className="muted">Run the `search_listings` tool to render the map and list.</p>
+        <p>{emptyTitle}</p>
+        <p className="muted">{emptyMessage}</p>
       </div>
     );
   }

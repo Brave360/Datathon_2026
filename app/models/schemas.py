@@ -6,6 +6,11 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+class ConversationTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1)
+
+
 class HardFilters(BaseModel):
     city: list[str] | None = None
     postal_code: list[str] | None = None
@@ -14,6 +19,8 @@ class HardFilters(BaseModel):
     max_price: int | None = Field(default=None, ge=0)
     min_rooms: float | None = Field(default=None, ge=0)
     max_rooms: float | None = Field(default=None, ge=0)
+    min_area_sqm: float | None = Field(default=None, ge=0)
+    max_area_sqm: float | None = Field(default=None, ge=0)
     latitude: float | None = None
     longitude: float | None = None
     radius_km: float | None = Field(default=None, ge=0)
@@ -27,6 +34,7 @@ class HardFilters(BaseModel):
 
 class ListingsQueryRequest(BaseModel):
     query: str = Field(min_length=1)
+    conversation: list[ConversationTurn] = Field(default_factory=list)
     limit: int = Field(default=25, ge=1, le=500)
     offset: int = Field(default=0, ge=0)
 
