@@ -3,10 +3,14 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter
+from fastapi import HTTPException
 
+from app.harness.conversation_store import append_turns, get_turns
 from app.config import get_settings
 from app.harness.search_service import query_from_filters, query_from_text
 from app.models.schemas import (
+    ConversationHistoryResponse,
+    ConversationTurn,
     HealthResponse,
     ListingsQueryRequest,
     ListingsResponse,
@@ -39,12 +43,33 @@ def listings(request: ListingsQueryRequest) -> ListingsResponse:
         limit=request.limit,
         offset=request.offset,
     )
+    if request.conversation_id:
+        assistant_summary = response.meta.get("assistant_summary")
+        assistant_turn = ConversationTurn(
+            role="assistant",
+            content=assistant_summary if isinstance(assistant_summary, str) else "",
+        )
+        append_turns(
+            request.conversation_id,
+            [
+                ConversationTurn(role="user", content=request.query),
+                assistant_turn,
+            ],
+        )
     LOGGER.info(
-        "/listings completed listings_count=%s extracted_hard_filters=%s",
+        "/listings completed listings_count=%s effective_hard_filters=%s",
         len(response.listings),
-        response.meta.get("extracted_hard_filters"),
+        response.meta.get("effective_hard_filters"),
     )
     return response
+
+
+@router.get("/listings/history/{conversation_id}", response_model=ConversationHistoryResponse)
+def listings_history(conversation_id: str) -> ConversationHistoryResponse:
+    messages = get_turns(conversation_id)
+    if not messages:
+        raise HTTPException(status_code=404, detail="Conversation history not found")
+    return ConversationHistoryResponse(conversation_id=conversation_id, messages=messages)
 
 
 @router.post("/listings/search/filter", response_model=ListingsResponse)

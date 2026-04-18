@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from app.models.schemas import HardFilters
+from app.models.schemas import ListingsResponse
 
 
 def test_health_endpoint(tmp_path: Path) -> None:
@@ -30,8 +30,16 @@ def test_post_listings_returns_ranked_results(tmp_path: Path) -> None:
 
     with (
         patch(
-            "app.harness.search_service.extract_hard_facts",
-            return_value=HardFilters(city=["Winterthur"]),
+            "app.api.routes.listings.query_from_text",
+            return_value=ListingsResponse(
+                listings=[],
+                meta={
+                    "effective_hard_filters": {"city": ["Winterthur"]},
+                    "effective_soft_filters": {"feature_balcony": True},
+                    "assistant_summary": "Summary",
+                    "conversation_turn_count": 1,
+                },
+            ),
         ),
         TestClient(app) as client,
     ):
@@ -44,13 +52,8 @@ def test_post_listings_returns_ranked_results(tmp_path: Path) -> None:
     assert "meta" in body
     assert isinstance(body["listings"], list)
     assert len(body["listings"]) <= 25
-    assert body["listings"]
-    assert {"listing_id", "score", "reason", "listing"} <= set(body["listings"][0].keys())
-    assert {"id", "title"} <= set(body["listings"][0]["listing"].keys())
-    assert isinstance(body["listings"][0]["score"], float)
-    assert isinstance(body["listings"][0]["reason"], str)
-    assert "extracted_hard_filters" in body["meta"]
-    assert body["meta"]["extracted_hard_filters"]["city"] == ["Winterthur"]
+    assert body["meta"]["effective_hard_filters"]["city"] == ["Winterthur"]
+    assert body["meta"]["effective_soft_filters"]["feature_balcony"] is True
     assert body["meta"]["conversation_turn_count"] == 1
 
 
@@ -63,9 +66,17 @@ def test_post_listings_accepts_conversation_turns(tmp_path: Path) -> None:
 
     with (
         patch(
-            "app.harness.search_service.extract_hard_facts",
-            return_value=HardFilters(city=["Zurich"]),
-        ) as mocked_extract,
+            "app.api.routes.listings.query_from_text",
+            return_value=ListingsResponse(
+                listings=[],
+                meta={
+                    "effective_hard_filters": {"city": ["Zurich"]},
+                    "effective_soft_filters": {},
+                    "assistant_summary": "Summary",
+                    "conversation_turn_count": 3,
+                },
+            ),
+        ) as mocked_query,
         TestClient(app) as client,
     ):
         response = client.post(
@@ -80,9 +91,50 @@ def test_post_listings_accepts_conversation_turns(tmp_path: Path) -> None:
         )
 
     assert response.status_code == 200
-    _, kwargs = mocked_extract.call_args
+    _, kwargs = mocked_query.call_args
     assert len(kwargs["conversation"]) == 2
     assert kwargs["conversation"][0].content == "I want a flat in Zurich with balcony"
+
+
+def test_post_listings_stores_and_returns_conversation_history(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    os.environ["LISTINGS_RAW_DATA_DIR"] = str(repo_root / "raw_data")
+    os.environ["LISTINGS_DB_PATH"] = str(tmp_path / "listings.db")
+
+    from app.main import app
+
+    with (
+        patch(
+            "app.api.routes.listings.query_from_text",
+            return_value=ListingsResponse(
+                listings=[],
+                meta={
+                    "effective_hard_filters": {"city": ["Zurich"]},
+                    "effective_soft_filters": {"feature_balcony": True},
+                    "assistant_summary": 'Previous hard filters: {"city": ["Zurich"]}.',
+                    "conversation_turn_count": 1,
+                },
+            ),
+        ),
+        TestClient(app) as client,
+    ):
+        post_response = client.post(
+            "/listings",
+            json={
+                "query": "flat in Zurich",
+                "conversation_id": "test-conversation",
+            },
+        )
+        history_response = client.get("/listings/history/test-conversation")
+
+    assert post_response.status_code == 200
+    assert history_response.status_code == 200
+    body = history_response.json()
+    assert body["conversation_id"] == "test-conversation"
+    assert body["messages"] == [
+        {"role": "user", "content": "flat in Zurich"},
+        {"role": "assistant", "content": 'Previous hard filters: {"city": ["Zurich"]}.'},
+    ]
 
 
 def test_post_listings_search_filter_applies_explicit_hard_filters(tmp_path: Path) -> None:

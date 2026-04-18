@@ -34,6 +34,7 @@ class HardFilters(BaseModel):
 
 class ListingsQueryRequest(BaseModel):
     query: str = Field(min_length=1)
+    conversation_id: str | None = None
     conversation: list[ConversationTurn] = Field(default_factory=list)
     limit: int = Field(default=25, ge=1, le=500)
     offset: int = Field(default=0, ge=0)
@@ -76,6 +77,11 @@ class RankedListingResult(BaseModel):
 class ListingsResponse(BaseModel):
     listings: list[RankedListingResult]
     meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConversationHistoryResponse(BaseModel):
+    conversation_id: str
+    messages: list[ConversationTurn] = Field(default_factory=list)
 
 
 class HealthResponse(BaseModel):

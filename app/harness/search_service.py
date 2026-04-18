@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -34,7 +35,7 @@ def query_from_text(
         limit,
         offset,
     )
-    parsed = parse_query(query)
+    parsed = parse_query(query, conversation=conversation)
     LOGGER.info("query_from_text parsed hard=%s", parsed.hard_requirements.model_dump(exclude_none=True))
     LOGGER.info("query_from_text parsed soft=%s", parsed.soft_requirements.model_dump(exclude_none=True))
 
@@ -55,6 +56,11 @@ def query_from_text(
         meta={
             "effective_hard_filters": result.effective_hard.model_dump(exclude_none=True),
             "effective_soft_filters": result.effective_soft.model_dump(exclude_none=True),
+            "assistant_summary": build_assistant_summary(
+                effective_hard_filters=result.effective_hard.model_dump(exclude_none=True),
+                effective_soft_filters=result.effective_soft.model_dump(exclude_none=True),
+                result_count=len(ranked),
+            ),
             "relaxation_log": result.relaxation_log,
             "total_before_page": result.total_before_page,
             "conversation_turn_count": len(conversation) + 1,
@@ -102,4 +108,17 @@ def to_hard_filter_params(hard_facts: HardFilters) -> HardFilterParams:
         limit=hard_facts.limit,
         offset=hard_facts.offset,
         sort_by=hard_facts.sort_by,
+    )
+
+
+def build_assistant_summary(
+    *,
+    effective_hard_filters: dict[str, Any],
+    effective_soft_filters: dict[str, Any],
+    result_count: int,
+) -> str:
+    return (
+        f"Previous hard filters: {json.dumps(effective_hard_filters, ensure_ascii=False)}. "
+        f"Previous soft filters: {json.dumps(effective_soft_filters, ensure_ascii=False)}. "
+        f"Returned {result_count} listings."
     )

@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 import anthropic
 
 from app.config import get_settings
+from app.models.schemas import ConversationTurn
 
 
 class PointOfInterest(BaseModel):
@@ -90,7 +91,14 @@ Rules:
 2. Soft requirements: the user expresses a preference, wish, or nice-to-have. Listings matching
    more soft requirements rank higher.
 3. If a requirement is ambiguous, place it in soft_requirements.
-4. For points_of_interest: if the user mentions wanting to be near any place — a category, a
+4. When prior conversation turns are present, treat the latest user message as a modification to
+   the existing search unless it clearly starts over. Preserve earlier constraints and preferences
+   by default, and change only the parts the user explicitly changes.
+   Example: previous search says "Zurich with balcony under 3200 CHF" and the latest user says
+   "make it cheaper" -> keep Zurich and balcony, lower the budget.
+   Example: previous search says "3-room apartment in Zurich" and the latest user says
+   "actually in Winterthur" -> replace Zurich with Winterthur.
+5. For points_of_interest: if the user mentions wanting to be near any place — a category, a
    specific chain, or a named landmark — add an entry.
    - Category (generic): set `type` to the category and `query` to "<category> <city>".
      Examples: school → `{"type":"school","query":"primary school Bern","radius_km":0.5}`
@@ -104,7 +112,7 @@ Rules:
      Example: "ETH Zurich Zentrum" → `{"type":"university","query":"ETH Zurich Zentrum","radius_km":1.0}`
    - If no city context is available, keep `query` as specific as possible without inventing a city.
    - Set `radius_km` to whatever the user specifies, or 1.0 by default.
-5. Set unmentioned fields to null / empty list — do not invent values.
+6. Set unmentioned fields to null / empty list — do not invent values.
 """
 
 
@@ -174,7 +182,22 @@ _TOOL = {
 }
 
 
-def parse_query(query: str) -> ParsedQuery:
+def _build_messages(
+    *,
+    query: str,
+    conversation: list[ConversationTurn] | None = None,
+) -> list[dict[str, str]]:
+    messages: list[dict[str, str]] = []
+    for turn in conversation or []:
+        messages.append({"role": turn.role, "content": turn.content})
+    messages.append({"role": "user", "content": query})
+    return messages
+
+
+def parse_query(
+    query: str,
+    conversation: list[ConversationTurn] | None = None,
+) -> ParsedQuery:
     settings = get_settings()
     client = anthropic.Anthropic(
         api_key=settings.claude_api_key,
@@ -186,7 +209,7 @@ def parse_query(query: str) -> ParsedQuery:
         system=_SYSTEM_PROMPT,
         tools=[_TOOL],
         tool_choice={"type": "auto"},
-        messages=[{"role": "user", "content": query}],
+        messages=_build_messages(query=query, conversation=conversation),
     )
     tool_block = next(b for b in response.content if b.type == "tool_use")
     data = tool_block.input
@@ -196,8 +219,11 @@ def parse_query(query: str) -> ParsedQuery:
     )
 
 
-def parse_query_to_dict(query: str) -> dict[str, Any]:
-    result = parse_query(query)
+def parse_query_to_dict(
+    query: str,
+    conversation: list[ConversationTurn] | None = None,
+) -> dict[str, Any]:
+    result = parse_query(query, conversation=conversation)
     return result.model_dump(exclude_none=False)
 
 
