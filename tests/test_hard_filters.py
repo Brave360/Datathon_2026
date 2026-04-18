@@ -41,6 +41,20 @@ def test_hard_filter_by_price_and_rooms_returns_matching_rows(tmp_path: Path) ->
         assert rooms is not None and 2.0 <= rooms <= 4.5
 
 
+def test_hard_filter_by_area_returns_matching_rows(tmp_path: Path) -> None:
+    db_path = build_database(tmp_path)
+
+    rows = search_listings(
+        db_path,
+        HardFilterParams(min_area_sqm=70, max_area_sqm=100, limit=25),
+    )
+
+    assert rows
+    for row in rows:
+        area = row.get("area")
+        assert area is not None and 70 <= area <= 100
+
+
 def test_hard_filter_pagination_limits_results(tmp_path: Path) -> None:
     db_path = build_database(tmp_path)
 

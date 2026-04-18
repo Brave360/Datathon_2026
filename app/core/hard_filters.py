@@ -18,6 +18,8 @@ class HardFilterParams:
     max_price: int | None = None
     min_rooms: float | None = None
     max_rooms: float | None = None
+    min_area_sqm: float | None = None
+    max_area_sqm: float | None = None
     latitude: float | None = None
     longitude: float | None = None
     radius_km: float | None = None
@@ -87,6 +89,14 @@ def search_listings(db_path: Path, filters: HardFilterParams) -> list[dict[str, 
     if filters.max_rooms is not None:
         where_clauses.append("rooms <= ?")
         params.append(filters.max_rooms)
+
+    if filters.min_area_sqm is not None:
+        where_clauses.append("area >= ?")
+        params.append(filters.min_area_sqm)
+
+    if filters.max_area_sqm is not None:
+        where_clauses.append("area <= ?")
+        params.append(filters.max_area_sqm)
 
     if filters.offer_type:
         where_clauses.append("UPPER(offer_type) = ?")

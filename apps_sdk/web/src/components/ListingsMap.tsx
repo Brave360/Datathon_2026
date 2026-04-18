@@ -124,6 +124,12 @@ export default function ListingsMap({
         bounds.extend([result.listing.longitude!, result.listing.latitude!]);
       });
       map.fitBounds(bounds, { padding: 60, maxZoom: 13, duration: 0 });
+    } else {
+      map.easeTo({
+        center: [8.54, 47.37],
+        zoom: 7,
+        duration: 0,
+      });
     }
   }, [coordinateResults, onSelect, selectedId]);
 
@@ -144,13 +150,14 @@ export default function ListingsMap({
     }
   }, [selectedListing]);
 
-  if (!coordinateResults.length) {
-    return (
-      <div className="map-empty-state">
-        <p>No coordinates available for the current result set.</p>
-      </div>
-    );
-  }
-
-  return <div ref={mapContainerRef} className="map-container" />;
+  return (
+    <div className="map-surface">
+      <div ref={mapContainerRef} className="map-container" />
+      {!coordinateResults.length ? (
+        <div className="map-empty-state">
+          <p>No coordinates available for the current result set.</p>
+        </div>
+      ) : null}
+    </div>
+  );
 }
