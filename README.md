@@ -47,6 +47,63 @@ Starter-harness glue code lives under `app/harness/`:
 
 Those files handle orchestration, startup wiring, and import flow.
 
+## Claude Hard Constraint Extraction
+
+The natural-language `/listings` flow now calls Claude from:
+
+- `app/participant/hard_fact_extraction.py`
+
+That function is used here:
+
+- `app/harness/search_service.py`
+  `query_from_text()` calls `extract_hard_facts(query)` before database filtering.
+
+Set your Claude key in one of these environment variables:
+
+```bash
+export CLAUDE_API_KEY=your_key_here
+```
+
+or
+
+```bash
+export ANTHROPIC_API_KEY=your_key_here
+```
+
+Optional Claude config:
+
+```bash
+export CLAUDE_MODEL=claude-sonnet-4-5
+export CLAUDE_API_BASE_URL=https://api.anthropic.com
+export CLAUDE_TIMEOUT_SECONDS=20
+```
+
+If no Claude key is set, the harness falls back to empty hard filters so the API still runs.
+
+For debugging, each `/listings` response now includes:
+
+```json
+{
+  "meta": {
+    "extracted_hard_filters": {
+      "city": ["Winterthur"]
+    }
+  }
+}
+```
+
+The harness also appends a JSON line per extraction attempt to:
+
+```text
+data/hard_facts_debug.jsonl
+```
+
+You can override that path with:
+
+```bash
+export HARD_FACTS_DEBUG_LOG_PATH=/your/custom/path/hard_facts_debug.jsonl
+```
+
 ## Quick Start
 
 ### Run locally

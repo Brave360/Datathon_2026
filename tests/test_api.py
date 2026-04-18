@@ -1,7 +1,10 @@
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+
+from app.models.schemas import HardFilters
 
 
 def test_health_endpoint(tmp_path: Path) -> None:
@@ -25,7 +28,13 @@ def test_post_listings_returns_ranked_results(tmp_path: Path) -> None:
 
     from app.main import app
 
-    with TestClient(app) as client:
+    with (
+        patch(
+            "app.harness.search_service.extract_hard_facts",
+            return_value=HardFilters(city=["Winterthur"]),
+        ),
+        TestClient(app) as client,
+    ):
         response = client.post("/listings", json={"query": "3 room flat in winterthur"})
 
     assert response.status_code == 200
@@ -40,6 +49,8 @@ def test_post_listings_returns_ranked_results(tmp_path: Path) -> None:
     assert {"id", "title"} <= set(body["listings"][0]["listing"].keys())
     assert isinstance(body["listings"][0]["score"], float)
     assert isinstance(body["listings"][0]["reason"], str)
+    assert "extracted_hard_filters" in body["meta"]
+    assert body["meta"]["extracted_hard_filters"]["city"] == ["Winterthur"]
 
 
 def test_post_listings_search_filter_applies_explicit_hard_filters(tmp_path: Path) -> None:
