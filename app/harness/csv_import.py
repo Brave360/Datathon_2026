@@ -27,11 +27,6 @@ def create_schema(connection: sqlite3.Connection) -> None:
             available_from TEXT,
             latitude REAL,
             longitude REAL,
-            distance_public_transport INTEGER,
-            distance_shop INTEGER,
-            distance_kindergarten INTEGER,
-            distance_school_1 INTEGER,
-            distance_school_2 INTEGER,
             feature_balcony INTEGER,
             feature_elevator INTEGER,
             feature_parking INTEGER,
@@ -45,6 +40,10 @@ def create_schema(connection: sqlite3.Connection) -> None:
             feature_private_laundry INTEGER,
             feature_minergie_certified INTEGER,
             features_json TEXT NOT NULL,
+            bedrooms INTEGER,
+            bathrooms INTEGER,
+            year_built INTEGER,
+            last_renovation INTEGER,
             offer_type TEXT,
             object_category TEXT,
             object_type TEXT,
@@ -67,7 +66,7 @@ def import_csvs(connection: sqlite3.Connection, csv_paths: Iterable[Path]) -> No
 
             connection.executemany(
                 """
-                INSERT INTO listings (
+                INSERT OR REPLACE INTO listings (
                     listing_id,
                     platform_id,
                     scrape_source,
@@ -83,11 +82,6 @@ def import_csvs(connection: sqlite3.Connection, csv_paths: Iterable[Path]) -> No
                     available_from,
                     latitude,
                     longitude,
-                    distance_public_transport,
-                    distance_shop,
-                    distance_kindergarten,
-                    distance_school_1,
-                    distance_school_2,
                     feature_balcony,
                     feature_elevator,
                     feature_parking,
@@ -101,6 +95,10 @@ def import_csvs(connection: sqlite3.Connection, csv_paths: Iterable[Path]) -> No
                     feature_private_laundry,
                     feature_minergie_certified,
                     features_json,
+                    bedrooms,
+                    bathrooms,
+                    year_built,
+                    last_renovation,
                     offer_type,
                     object_category,
                     object_type,
@@ -109,7 +107,7 @@ def import_csvs(connection: sqlite3.Connection, csv_paths: Iterable[Path]) -> No
                     location_address_json,
                     orig_data_json,
                     raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 rows,
             )
