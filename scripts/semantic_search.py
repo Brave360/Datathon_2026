@@ -78,7 +78,7 @@ def vector_search(query_vector: list[float], limit: int) -> list[str]:
             "_source": ["listing_id"],
         },
     )
-    return [hit["_source"]["listing_id"] for hit in response["hits"]["hits"]]
+    return [(hit["_source"]["listing_id"], hit["_score"]) for hit in response["hits"]["hits"]]
 
 # ── SQLite fetch ──────────────────────────────────────────────────────────────
 
@@ -108,13 +108,16 @@ def main() -> None:
     query_vector = embed(args.query)
 
     print(f"Searching top {args.limit} listings...")
-    listing_ids = vector_search(query_vector, args.limit)
+    hits = vector_search(query_vector, args.limit)
+    listing_ids = [lid for lid, _ in hits]
+    scores = {lid: score for lid, score in hits}
 
     listings = fetch_listings(listing_ids)
 
     print(f"\nTop {len(listings)} results:\n")
     for i, listing in enumerate(listings, 1):
-        print(f"#{i} [{listing['listing_id']}] {listing['title']}")
+        score = scores.get(listing["listing_id"], 0.0)
+        print(f"#{i} [{listing['listing_id']}] {listing['title']} (score: {score:.4f})")
         print(f"    {listing['city']} | {listing['price']} CHF | {listing['rooms']} rooms")
         print(f"    {listing['description'] or ''}")
         print()
