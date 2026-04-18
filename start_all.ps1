@@ -17,14 +17,8 @@ function Resolve-PythonExecutable {
         throw "The provided Python executable was not found: $PreferredPython"
     }
 
-    foreach ($candidate in @("python", "py")) {
-        $command = Get-Command $candidate -ErrorAction SilentlyContinue
-        if ($command) {
-            return $command.Source
-        }
-    }
-
     $knownCandidates = @(
+        "C:\Users\willi\AppData\Local\Programs\Python\Python311\python.exe",
         "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\python3.11.exe"
     )
 
@@ -58,6 +52,10 @@ $npmInstallCommand = if ($SkipNpmInstall) { "" } else { "npm install; " }
 $backendCommand = @"
 Set-Location -LiteralPath '$repoRoot';
 `$env:PYTHONPATH='.';
+`$env:AWS_DEFAULT_REGION='us-west-2';
+`$env:AWS_ACCESS_KEY_ID='$env:AWS_ACCESS_KEY_ID';
+`$env:AWS_SECRET_ACCESS_KEY='$env:AWS_SECRET_ACCESS_KEY';
+`$env:AWS_SESSION_TOKEN='$env:AWS_SESSION_TOKEN';
 & '$pythonPath' -m uvicorn app.main:app --reload --port 8000
 "@
 
@@ -72,6 +70,10 @@ Set-Location -LiteralPath '$webRoot';
 $npmInstallCommand npm run build;
 Set-Location -LiteralPath '$repoRoot';
 `$env:PYTHONPATH='.';
+`$env:AWS_DEFAULT_REGION='us-west-2';
+`$env:AWS_ACCESS_KEY_ID='$env:AWS_ACCESS_KEY_ID';
+`$env:AWS_SECRET_ACCESS_KEY='$env:AWS_SECRET_ACCESS_KEY';
+`$env:AWS_SESSION_TOKEN='$env:AWS_SESSION_TOKEN';
 & '$pythonPath' -m uvicorn apps_sdk.server.main:app --reload --port 8001
 "@
 
