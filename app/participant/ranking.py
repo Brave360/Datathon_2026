@@ -200,7 +200,7 @@ def _poi_score(
     lat = candidate.get("latitude")
     lon = candidate.get("longitude")
     if lat is None or lon is None:
-        return 0.5
+        return 0.0
 
     components: list[float] = []
     for poi_lat, poi_lon, radius_km in poi_locations:
