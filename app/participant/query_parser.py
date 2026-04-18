@@ -98,8 +98,10 @@ Rules:
    "make it cheaper" -> keep Zurich and balcony, lower the budget.
    Example: previous search says "3-room apartment in Zurich" and the latest user says
    "actually in Winterthur" -> replace Zurich with Winterthur.
-5. For points_of_interest: if the user mentions wanting to be near any place — a category, a
-   specific chain, or a named landmark — add an entry.
+5. points_of_interest MUST always go in soft_requirements, never in hard_requirements.
+   Proximity cannot be filtered in the database — it is scored at ranking time.
+   If the user mentions wanting to be near any place — a category, a specific chain, or a
+   named landmark — add an entry to soft_requirements.points_of_interest.
    - Category (generic): set `type` to the category and `query` to "<category> <city>".
      Examples: school → `{"type":"school","query":"primary school Bern","radius_km":0.5}`
                hospital → `{"type":"hospital","query":"hospital Zurich","radius_km":2.0}`

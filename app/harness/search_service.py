@@ -48,19 +48,31 @@ def query_from_text(
         LOGGER.info("query_from_text relaxation_log=%s", result.relaxation_log)
     LOGGER.info("query_from_text candidates=%s total=%s", len(result.listings), result.total_before_page)
 
-    ranked = rank_listings(result.listings, result.effective_soft.model_dump(exclude_none=True), query_text=query)
+    soft_dict = result.effective_soft.model_dump(exclude_none=True)
+    # POIs can't be SQL-filtered; rescue any that the parser placed in hard
+    hard_pois = result.effective_hard.points_of_interest
+    soft_pois = soft_dict.get("points_of_interest") or []
+    if hard_pois:
+        soft_dict["points_of_interest"] = hard_pois + soft_pois
+        LOGGER.info("query_from_text merged %s hard POIs into soft for ranking", len(hard_pois))
+
+    ranked = rank_listings(result.listings, soft_dict, query_text=query)
     ranked = ranked[offset : offset + limit]
     LOGGER.info("query_from_text ranked_results=%s (limit=%s offset=%s)", len(ranked), limit, offset)
     return ListingsResponse(
         listings=ranked,
         meta={
             "effective_hard_filters": result.effective_hard.model_dump(exclude_none=True),
+<<<<<<< HEAD
             "effective_soft_filters": result.effective_soft.model_dump(exclude_none=True),
             "assistant_summary": build_assistant_summary(
                 effective_hard_filters=result.effective_hard.model_dump(exclude_none=True),
                 effective_soft_filters=result.effective_soft.model_dump(exclude_none=True),
                 result_count=len(ranked),
             ),
+=======
+            "effective_soft_filters": soft_dict,
+>>>>>>> 94c7ab94361d178d278b3c595ff9db8722c7fac5
             "relaxation_log": result.relaxation_log,
             "total_before_page": result.total_before_page,
             "conversation_turn_count": len(conversation) + 1,

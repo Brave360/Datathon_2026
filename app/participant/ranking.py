@@ -200,7 +200,7 @@ def _poi_score(
     lat = candidate.get("latitude")
     lon = candidate.get("longitude")
     if lat is None or lon is None:
-        return 0.5
+        return 0.0
 
     components: list[float] = []
     for poi_lat, poi_lon, radius_km in poi_locations:
@@ -245,6 +245,10 @@ def _terms_from_soft(soft_facts: dict[str, Any]) -> Counter:
     return _tokenize(" ".join(parts))
 
 
+def _clean_poi_query(query: str) -> str:
+    return re.sub(r"'s?\b", "", query).strip()
+
+
 def _geocode_pois(pois: list[dict[str, Any]]) -> list[tuple[float, float, float]]:
     if not pois:
         return []
@@ -256,7 +260,7 @@ def _geocode_pois(pois: list[dict[str, Any]]) -> list[tuple[float, float, float]
         if not query:
             continue
         try:
-            loc = geolocator.geocode(query, country_codes="ch", timeout=5)
+            loc = geolocator.geocode(_clean_poi_query(query), country_codes="ch", timeout=5)
             if loc:
                 results.append((loc.latitude, loc.longitude, radius_km))
         except Exception:
