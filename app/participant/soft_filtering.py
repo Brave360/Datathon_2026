@@ -18,24 +18,38 @@ EMBEDDING_DIMS = 256
 OPENSEARCH_ENDPOINT = "https://rwjzlgc3jmnsm1knq1w2.us-west-2.aoss.amazonaws.com"
 AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "us-west-2")
 
-_session = boto3.Session()
-_credentials = _session.get_credentials().get_frozen_credentials()
-_awsauth = AWS4Auth(
-    _credentials.access_key,
-    _credentials.secret_key,
-    AWS_REGION,
-    "aoss",
-    session_token=_credentials.token,
-)
-_bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION)
-_os_client = OpenSearch(
-    hosts=[{"host": OPENSEARCH_ENDPOINT.removeprefix("https://"), "port": 443}],
-    http_auth=_awsauth,
-    use_ssl=True,
-    verify_certs=True,
-    connection_class=RequestsHttpConnection,
-    timeout=30,
-)
+_bedrock = None
+_os_client = None
+
+def _init_aws_clients() -> bool:
+    global _bedrock, _os_client
+    if _bedrock is not None:
+        return True
+    try:
+        session = boto3.Session()
+        creds = session.get_credentials()
+        if creds is None:
+            return False
+        frozen = creds.get_frozen_credentials()
+        awsauth = AWS4Auth(
+            frozen.access_key,
+            frozen.secret_key,
+            AWS_REGION,
+            "aoss",
+            session_token=frozen.token,
+        )
+        _bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+        _os_client = OpenSearch(
+            hosts=[{"host": OPENSEARCH_ENDPOINT.removeprefix("https://"), "port": 443}],
+            http_auth=awsauth,
+            use_ssl=True,
+            verify_certs=True,
+            connection_class=RequestsHttpConnection,
+            timeout=30,
+        )
+        return True
+    except Exception:
+        return False
 
 def _embed(text: str) -> list[float]:
     body = json.dumps({"inputText": text[:8000], "dimensions": EMBEDDING_DIMS, "normalize": True})
@@ -44,6 +58,8 @@ def _embed(text: str) -> list[float]:
 
 def semantic_score_desc(query: str, candidates: list[dict]) -> dict[str, float]:
     """Returns a mapping of listing_id -> semantic similarity score for each candidate."""
+    if not _init_aws_clients():
+        raise RuntimeError("AWS credentials not available")
     K = 250
     query_vector = _embed(query)
     response = _os_client.search(
