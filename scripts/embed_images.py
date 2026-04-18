@@ -22,8 +22,10 @@ from pathlib import Path
 
 import boto3
 import httpx
+from PIL import Image
 from opensearchpy import OpenSearch, RequestsHttpConnection
 from requests_aws4auth import AWS4Auth
+
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -32,7 +34,7 @@ INDEX_NAME = "images"
 EMBEDDING_MODEL_ID = "amazon.titan-embed-image-v1"
 EMBEDDING_DIMS = 256
 BATCH_SIZE = 50
-MAX_WORKERS = 10   # lower than text — image downloads add latency
+MAX_WORKERS = 20
 
 OPENSEARCH_ENDPOINT = "https://rwjzlgc3jmnsm1knq1w2.us-west-2.aoss.amazonaws.com"
 AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "us-west-2")
@@ -63,7 +65,7 @@ _os_client = OpenSearch(
     use_ssl=True,
     verify_certs=True,
     connection_class=RequestsHttpConnection,
-    timeout=30,
+    timeout=3,
 )
 
 # ── Index setup ───────────────────────────────────────────────────────────────
@@ -118,10 +120,22 @@ def extract_image_urls(images_json: str | None) -> list[str]:
     return urls
 
 
+MAX_PIXELS = 2048
+
+def _resize_if_needed(data: bytes) -> bytes:
+    import io
+    img = Image.open(io.BytesIO(data))
+    if img.width <= MAX_PIXELS and img.height <= MAX_PIXELS:
+        return data
+    img.thumbnail((MAX_PIXELS, MAX_PIXELS), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format=img.format or "JPEG")
+    return buf.getvalue()
+
+
 def download_image_b64(url: str) -> str | None:
     try:
         if url.startswith("s3://"):
-            # Parse s3://bucket/key
             without_prefix = url[5:]
             bucket, _, key = without_prefix.partition("/")
             obj = _s3_client.get_object(Bucket=bucket, Key=key)
@@ -130,6 +144,7 @@ def download_image_b64(url: str) -> str | None:
             response = httpx.get(url, timeout=10, follow_redirects=True)
             response.raise_for_status()
             data = response.content
+        data = _resize_if_needed(data)
         return base64.b64encode(data).decode("utf-8")
     except Exception as e:
         print(f"  Failed to download {url}: {e}")
@@ -138,21 +153,27 @@ def download_image_b64(url: str) -> str | None:
 
 # ── Embedding ─────────────────────────────────────────────────────────────────
 
-def embed_image(image_b64: str) -> list[float]:
+def embed_image(image_b64: str) -> list[float] | None:
     body = json.dumps({
         "inputImage": image_b64,
         "embeddingConfig": {"outputEmbeddingLength": EMBEDDING_DIMS},
     })
-    response = _bedrock().invoke_model(modelId=EMBEDDING_MODEL_ID, body=body)
-    return json.loads(response["body"].read())["embedding"]
+    try:
+        response = _bedrock().invoke_model(modelId=EMBEDDING_MODEL_ID, body=body)
+        return json.loads(response["body"].read())["embedding"]
+    except Exception as e:
+        print(f"  Skipping image — embed failed: {e}")
+        return None
 
 
 def process_listing(listing: dict) -> dict | None:
+    listing_id = listing["listing_id"]
     for url in extract_image_urls(listing["images_json"]):
         image_b64 = download_image_b64(url)
         if image_b64:
             vector = embed_image(image_b64)
-            return {"listing_id": listing["listing_id"], "image_embedding": vector}
+            if vector:
+                return {"listing_id": listing_id, "image_embedding": vector}
     return None
 
 
