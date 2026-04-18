@@ -25,6 +25,7 @@ def query_from_text(
     db_path: Path,
     query: str,
     conversation: list[ConversationTurn],
+    soft_preference_weights: dict[str, float] | None,
     limit: int,
     offset: int,
 ) -> ListingsResponse:
@@ -56,17 +57,30 @@ def query_from_text(
         soft_dict["points_of_interest"] = hard_pois + soft_pois
         LOGGER.info("query_from_text merged %s hard POIs into soft for ranking", len(hard_pois))
 
-    ranked = rank_listings(result.listings, soft_dict, query_text=query)
+    current_soft_preference_weights = _sanitize_score_component_weights(soft_preference_weights or {})
+    ranked = rank_listings(
+        result.listings,
+        soft_dict,
+        query_text=query,
+        component_weights=current_soft_preference_weights,
+    )
     ranked = ranked[offset : offset + limit]
     LOGGER.info("query_from_text ranked_results=%s (limit=%s offset=%s)", len(ranked), limit, offset)
+    effective_hard_filters = result.effective_hard.model_dump(exclude_none=True)
+    effective_soft_filters = result.effective_soft.model_dump(exclude_none=True)
     return ListingsResponse(
         listings=ranked,
         meta={
-            "effective_hard_filters": result.effective_hard.model_dump(exclude_none=True),
-            "effective_soft_filters": result.effective_soft.model_dump(exclude_none=True),
+            "effective_hard_filters": effective_hard_filters,
+            "effective_soft_filters": effective_soft_filters,
+            "score_component_weights": current_soft_preference_weights,
+            "score_weight_controls": build_score_weight_controls(
+                effective_soft_filters=effective_soft_filters,
+                current_weights=current_soft_preference_weights,
+            ),
             "assistant_summary": build_assistant_summary(
-                effective_hard_filters=result.effective_hard.model_dump(exclude_none=True),
-                effective_soft_filters=result.effective_soft.model_dump(exclude_none=True),
+                effective_hard_filters=effective_hard_filters,
+                effective_soft_filters=effective_soft_filters,
                 result_count=len(ranked),
             ),
             "relaxation_log": result.relaxation_log,
@@ -130,3 +144,114 @@ def build_assistant_summary(
         f"Previous soft filters: {json.dumps(effective_soft_filters, ensure_ascii=False)}. "
         f"Returned {result_count} listings."
     )
+
+
+_SCORE_COMPONENT_CONFIG: dict[str, dict[str, str]] = {
+    "text": {
+        "label": "Text",
+        "description": "How strongly semantic and keyword relevance should affect reranking.",
+    },
+    "poi": {
+        "label": "POI",
+        "description": "How strongly closeness to places like schools, shops, stations, or landmarks should affect reranking.",
+    },
+    "numeric": {
+        "label": "Numeric",
+        "description": "How strongly soft numeric preferences like price, size, rooms, or year should affect reranking.",
+    },
+    "feature": {
+        "label": "Features",
+        "description": "How strongly soft features like pets allowed, elevator, balcony, or furnished should affect reranking.",
+    },
+}
+
+
+def _sanitize_score_component_weights(weights: dict[str, float]) -> dict[str, float]:
+    sanitized: dict[str, float] = {}
+    for key, value in weights.items():
+        if key not in _SCORE_COMPONENT_CONFIG:
+            continue
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            continue
+        sanitized[key] = max(0.0, min(2.0, numeric_value))
+    return sanitized
+
+
+def build_score_weight_controls(
+    *,
+    effective_soft_filters: dict[str, Any],
+    current_weights: dict[str, float],
+) -> list[dict[str, Any]]:
+    active_components = {
+        "text": True,
+        "poi": bool(effective_soft_filters.get("points_of_interest")),
+        "feature": any(
+            effective_soft_filters.get(key) is not None
+            for key in (
+                "feature_balcony",
+                "feature_elevator",
+                "feature_parking",
+                "feature_garage",
+                "feature_fireplace",
+                "feature_child_friendly",
+                "feature_pets_allowed",
+                "feature_temporary",
+                "feature_new_build",
+                "feature_wheelchair_accessible",
+                "feature_private_laundry",
+                "feature_minergie_certified",
+                "is_furnished",
+                "brightness",
+                "has_view",
+                "is_quiet",
+                "family_friendly",
+                "student_friendly",
+                "near_nature",
+                "near_lake",
+                "central_location",
+                "has_outdoor_space",
+                "pets_allowed",
+                "has_parking",
+                "has_elevator",
+            )
+        ),
+        "numeric": any(
+            isinstance(effective_soft_filters.get(key), (int, float))
+            for key in (
+                "min_price",
+                "max_price",
+                "min_rooms",
+                "max_rooms",
+                "min_area",
+                "max_area",
+                "min_bedrooms",
+                "max_bedrooms",
+                "min_bathrooms",
+                "max_bathrooms",
+                "min_year_built",
+                "max_year_built",
+                "preferred_rooms",
+                "preferred_area_sqm",
+                "min_floor",
+            )
+        ),
+    }
+    controls: list[dict[str, Any]] = []
+    for key, active in active_components.items():
+        if not active:
+            continue
+        config = _SCORE_COMPONENT_CONFIG[key]
+        controls.append(
+            {
+                "key": key,
+                "label": config["label"],
+                "description": config["description"],
+                "weight": current_weights.get(key, 1.0),
+                "min_weight": 0.0,
+                "max_weight": 2.0,
+                "default_weight": 1.0,
+            }
+        )
+    return controls

@@ -93,6 +93,7 @@ def test_post_listings_accepts_conversation_turns(tmp_path: Path) -> None:
     assert response.status_code == 200
     _, kwargs = mocked_query.call_args
     assert len(kwargs["conversation"]) == 2
+    assert kwargs["soft_preference_weights"] == {}
     assert kwargs["conversation"][0].content == "I want a flat in Zurich with balcony"
 
 
@@ -135,6 +136,46 @@ def test_post_listings_stores_and_returns_conversation_history(tmp_path: Path) -
         {"role": "user", "content": "flat in Zurich"},
         {"role": "assistant", "content": 'Previous hard filters: {"city": ["Zurich"]}.'},
     ]
+
+
+def test_post_listings_rerank_passes_soft_preference_weights(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    os.environ["LISTINGS_RAW_DATA_DIR"] = str(repo_root / "raw_data")
+    os.environ["LISTINGS_DB_PATH"] = str(tmp_path / "listings.db")
+
+    from app.main import app
+
+    with (
+        patch(
+            "app.api.routes.listings.query_from_text",
+            return_value=ListingsResponse(
+                listings=[],
+                meta={
+                    "effective_hard_filters": {"city": ["Zurich"]},
+                    "effective_soft_filters": {"max_price": 3200},
+                    "score_component_weights": {"numeric": 1.6},
+                    "score_weight_controls": [],
+                    "assistant_summary": "Summary",
+                    "conversation_turn_count": 2,
+                },
+            ),
+        ) as mocked_query,
+        TestClient(app) as client,
+    ):
+        response = client.post(
+            "/listings/rerank",
+            json={
+                "query": "3 room apartment in Zurich",
+                "conversation": [],
+                "soft_preference_weights": {"numeric": 1.6},
+                "limit": 12,
+                "offset": 0,
+            },
+        )
+
+    assert response.status_code == 200
+    _, kwargs = mocked_query.call_args
+    assert kwargs["soft_preference_weights"] == {"numeric": 1.6}
 
 
 def test_post_listings_search_filter_applies_explicit_hard_filters(tmp_path: Path) -> None:

@@ -61,11 +61,13 @@ export default function ListingsMap({
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
 
-  const coordinateResults = results.filter(
-    (result) =>
-      typeof result.listing.latitude === "number" &&
-      typeof result.listing.longitude === "number",
-  );
+  const coordinateResults = results
+    .map((result, index) => ({ result, index }))
+    .filter(
+      ({ result }) =>
+        typeof result.listing.latitude === "number" &&
+        typeof result.listing.longitude === "number",
+    );
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) {
@@ -99,15 +101,29 @@ export default function ListingsMap({
       return;
     }
 
-    coordinateResults.forEach((result, index) => {
+    const seenCoordinateCounts = new Map<string, number>();
+
+    coordinateResults.forEach(({ result, index }) => {
+      const latitude = result.listing.latitude!;
+      const longitude = result.listing.longitude!;
+      const coordinateKey = `${latitude.toFixed(6)},${longitude.toFixed(6)}`;
+      const duplicateIndex = seenCoordinateCounts.get(coordinateKey) ?? 0;
+      seenCoordinateCounts.set(coordinateKey, duplicateIndex + 1);
+
+      const angle = duplicateIndex * 0.9;
+      const offsetScale = duplicateIndex === 0 ? 0 : 0.00018 * Math.ceil(duplicateIndex / 2);
+      const adjustedLongitude = longitude + Math.cos(angle) * offsetScale;
+      const adjustedLatitude = latitude + Math.sin(angle) * offsetScale;
+
       const el = document.createElement("button");
       el.type = "button";
       el.className = `map-pin ${selectedId === result.listing_id ? "selected" : ""}`;
       el.textContent = String(index + 1);
       el.onclick = () => onSelect(result.listing_id);
+      el.style.zIndex = String(Math.max(100, results.length - index));
 
       const marker = new maplibregl.Marker({ element: el })
-        .setLngLat([result.listing.longitude!, result.listing.latitude!])
+        .setLngLat([adjustedLongitude, adjustedLatitude])
         .setPopup(
           new maplibregl.Popup({ offset: 12 }).setHTML(
             `<strong>${result.listing.title}</strong><br/>${result.listing.city ?? ""}`,
@@ -120,7 +136,7 @@ export default function ListingsMap({
 
     if (coordinateResults.length) {
       const bounds = new maplibregl.LngLatBounds();
-      coordinateResults.forEach((result) => {
+      coordinateResults.forEach(({ result }) => {
         bounds.extend([result.listing.longitude!, result.listing.latitude!]);
       });
       map.fitBounds(bounds, { padding: 60, maxZoom: 13, duration: 0 });

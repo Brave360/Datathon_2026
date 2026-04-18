@@ -36,12 +36,22 @@ class ListingsQueryRequest(BaseModel):
     query: str = Field(min_length=1)
     conversation_id: str | None = None
     conversation: list[ConversationTurn] = Field(default_factory=list)
+    soft_preference_weights: dict[str, float] = Field(default_factory=dict)
     limit: int = Field(default=25, ge=1, le=500)
     offset: int = Field(default=0, ge=0)
 
 
 class ListingsSearchRequest(BaseModel):
     hard_filters: HardFilters | None = None
+
+
+class ListingsRerankRequest(BaseModel):
+    query: str = Field(min_length=1)
+    conversation_id: str | None = None
+    conversation: list[ConversationTurn] = Field(default_factory=list)
+    soft_preference_weights: dict[str, float] = Field(default_factory=dict)
+    limit: int = Field(default=25, ge=1, le=500)
+    offset: int = Field(default=0, ge=0)
 
 
 class ListingData(BaseModel):

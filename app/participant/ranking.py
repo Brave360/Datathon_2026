@@ -54,6 +54,7 @@ def rank_listings(
     candidates: list[dict[str, Any]],
     soft_facts: dict[str, Any],
     query_text: str = "",
+    component_weights: dict[str, float] | None = None,
 ) -> list[RankedListingResult]:
     if not candidates:
         return []
@@ -66,7 +67,7 @@ def rank_listings(
 
     scored: list[tuple[float, dict[str, float], dict[str, Any]]] = []
     for candidate in pool:
-        s, breakdown = _score(candidate, soft_facts, text_scores, poi_locations)
+        s, breakdown = _score(candidate, soft_facts, text_scores, poi_locations, component_weights or {})
         scored.append((s, breakdown, candidate))
 
     scored.sort(key=lambda x: x[0], reverse=True)
@@ -111,12 +112,26 @@ def _score(
     candidate: dict[str, Any],
     soft_facts: dict[str, Any],
     text_scores: dict[Any, float],
-    poi_locations: list[tuple[float, float, float]],
+    poi_locations: list[tuple[float, float, float, str]],
+    component_weights: dict[str, float],
 ) -> tuple[float, dict[str, float]]:
     has_features = bool({f for f in _BOOLEAN_FEATURE_FIELDS if soft_facts.get(f) is not None})
     has_numeric = any(
         soft_facts.get(k) is not None
-        for k in ("min_price", "max_price", "min_rooms", "max_rooms", "min_area", "max_area")
+        for k in (
+            "min_price",
+            "max_price",
+            "min_rooms",
+            "max_rooms",
+            "min_area",
+            "max_area",
+            "min_bedrooms",
+            "max_bedrooms",
+            "min_bathrooms",
+            "max_bathrooms",
+            "min_year_built",
+            "max_year_built",
+        )
     )
     has_poi = bool(poi_locations)
     # text always has signal (semantic scores vary across candidates)
@@ -127,8 +142,17 @@ def _score(
         "feature": has_features,
         "numeric": has_numeric,
     }
-    weight_sum = sum(_BASE_WEIGHTS[k] for k, on in active.items() if on)
-    weights = {k: (_BASE_WEIGHTS[k] / weight_sum if active[k] else 0.0) for k in active}
+    raw_weights = {
+        key: (_normalized_component_weight(component_weights, key) if active[key] else 0.0)
+        for key in active
+    }
+    if all(weight == 0.0 for weight in raw_weights.values()):
+        raw_weights = {
+            key: (_BASE_WEIGHTS[key] if active[key] else 0.0)
+            for key in active
+        }
+    weight_sum = sum(raw_weights.values())
+    weights = {k: (raw_weights[k] / weight_sum if active[k] and weight_sum else 0.0) for k in active}
 
     text_s    = text_scores.get(candidate["listing_id"], 0.5)
     poi_s     = _poi_score(candidate, poi_locations) if has_poi else None
@@ -157,7 +181,10 @@ def _feature_score(candidate: dict[str, Any], soft_facts: dict[str, Any]) -> flo
     return hits / len(desired)
 
 
-def _numeric_score(candidate: dict[str, Any], soft_facts: dict[str, Any]) -> float:
+def _numeric_score(
+    candidate: dict[str, Any],
+    soft_facts: dict[str, Any],
+) -> float:
     components: list[float] = []
 
     price = candidate.get("price")
@@ -165,7 +192,7 @@ def _numeric_score(candidate: dict[str, Any], soft_facts: dict[str, Any]) -> flo
     min_price = soft_facts.get("min_price")
     if price is not None and (max_price is not None or min_price is not None):
         target = max_price or min_price
-        components.append(_gaussian(price, target, scale=target * 0.3))
+        components.append(_gaussian(price, target, scale=max(target * 0.3, 1.0)))
 
     rooms = candidate.get("rooms")
     min_rooms = soft_facts.get("min_rooms")
@@ -179,7 +206,28 @@ def _numeric_score(candidate: dict[str, Any], soft_facts: dict[str, Any]) -> flo
     max_area = soft_facts.get("max_area")
     if area is not None and (min_area is not None or max_area is not None):
         target = min_area or max_area
-        components.append(_gaussian(area, target, scale=target * 0.3))
+        components.append(_gaussian(area, target, scale=max(target * 0.3, 1.0)))
+
+    bedrooms = candidate.get("bedrooms")
+    min_bedrooms = soft_facts.get("min_bedrooms")
+    max_bedrooms = soft_facts.get("max_bedrooms")
+    if bedrooms is not None and (min_bedrooms is not None or max_bedrooms is not None):
+        target = min_bedrooms or max_bedrooms
+        components.append(_gaussian(bedrooms, target, scale=1.5))
+
+    bathrooms = candidate.get("bathrooms")
+    min_bathrooms = soft_facts.get("min_bathrooms")
+    max_bathrooms = soft_facts.get("max_bathrooms")
+    if bathrooms is not None and (min_bathrooms is not None or max_bathrooms is not None):
+        target = min_bathrooms or max_bathrooms
+        components.append(_gaussian(bathrooms, target, scale=1.0))
+
+    year_built = candidate.get("year_built")
+    min_year_built = soft_facts.get("min_year_built")
+    max_year_built = soft_facts.get("max_year_built")
+    if year_built is not None and (min_year_built is not None or max_year_built is not None):
+        target = min_year_built or max_year_built
+        components.append(_gaussian(year_built, target, scale=25.0))
 
     return sum(components) / len(components) if components else 1.0
 
@@ -190,9 +238,18 @@ def _gaussian(value: float, target: float, scale: float) -> float:
     return math.exp(-((value - target) ** 2) / (2 * scale ** 2))
 
 
+def _normalized_component_weight(component_weights: dict[str, float], key: str) -> float:
+    raw = component_weights.get(key, _BASE_WEIGHTS.get(key, 1.0))
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return _BASE_WEIGHTS.get(key, 1.0)
+    return max(0.0, min(2.0, value))
+
+
 def _poi_score(
     candidate: dict[str, Any],
-    poi_locations: list[tuple[float, float, float]],
+    poi_locations: list[tuple[float, float, float, str]],
 ) -> float:
     if not poi_locations:
         return 1.0
@@ -203,12 +260,12 @@ def _poi_score(
         return 0.0
 
     components: list[float] = []
-    for poi_lat, poi_lon, radius_km in poi_locations:
+    for poi_lat, poi_lon, radius_km, _weight_key in poi_locations:
         dist = geodesic((lat, lon), (poi_lat, poi_lon)).km
         score = 1.0 / (1.0 + (dist / max(radius_km, 0.1)) ** 2)
         components.append(score)
 
-    return sum(components) / len(components)
+    return sum(components) / len(components) if components else 1.0
 
 
 def _keyword_score(candidate: dict[str, Any], query_terms: Counter) -> float:
@@ -249,20 +306,21 @@ def _clean_poi_query(query: str) -> str:
     return re.sub(r"'s?\b", "", query).strip()
 
 
-def _geocode_pois(pois: list[dict[str, Any]]) -> list[tuple[float, float, float]]:
+def _geocode_pois(pois: list[dict[str, Any]]) -> list[tuple[float, float, float, str]]:
     if not pois:
         return []
     geolocator = Nominatim(user_agent="datathon2026-ranker")
-    results: list[tuple[float, float, float]] = []
-    for poi in pois:
+    results: list[tuple[float, float, float, str]] = []
+    for index, poi in enumerate(pois):
         query = poi.get("query", "")
         radius_km = float(poi.get("radius_km", 1.0))
+        weight_key = f"poi:{index}:radius_km"
         if not query:
             continue
         try:
             loc = geolocator.geocode(_clean_poi_query(query), country_codes="ch", timeout=5)
             if loc:
-                results.append((loc.latitude, loc.longitude, radius_km))
+                results.append((loc.latitude, loc.longitude, radius_km, weight_key))
         except Exception:
             pass
     return results

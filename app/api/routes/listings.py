@@ -13,6 +13,7 @@ from app.models.schemas import (
     ConversationTurn,
     HealthResponse,
     ListingsQueryRequest,
+    ListingsRerankRequest,
     ListingsResponse,
     ListingsSearchRequest,
 )
@@ -40,6 +41,7 @@ def listings(request: ListingsQueryRequest) -> ListingsResponse:
         db_path=settings.db_path,
         query=request.query,
         conversation=request.conversation,
+        soft_preference_weights=request.soft_preference_weights,
         limit=request.limit,
         offset=request.offset,
     )
@@ -60,6 +62,33 @@ def listings(request: ListingsQueryRequest) -> ListingsResponse:
         "/listings completed listings_count=%s effective_hard_filters=%s",
         len(response.listings),
         response.meta.get("effective_hard_filters"),
+    )
+    return response
+
+
+@router.post("/listings/rerank", response_model=ListingsResponse)
+def listings_rerank(request: ListingsRerankRequest) -> ListingsResponse:
+    settings = get_settings()
+    LOGGER.info(
+        "Handling /listings/rerank query_len=%s conversation_turns=%s limit=%s offset=%s score_component_weights=%s",
+        len(request.query),
+        len(request.conversation),
+        request.limit,
+        request.offset,
+        sorted(request.soft_preference_weights.keys()),
+    )
+    response = query_from_text(
+        db_path=settings.db_path,
+        query=request.query,
+        conversation=request.conversation,
+        soft_preference_weights=request.soft_preference_weights,
+        limit=request.limit,
+        offset=request.offset,
+    )
+    LOGGER.info(
+        "/listings/rerank completed listings_count=%s score_component_weights=%s",
+        len(response.listings),
+        response.meta.get("score_component_weights"),
     )
     return response
 

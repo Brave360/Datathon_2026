@@ -249,6 +249,93 @@ body {
   padding: 2px 2px 6px;
 }
 
+.preference-panel {
+  border-radius: 20px;
+  border: 1px solid rgba(14, 107, 92, 0.14);
+  background: rgba(248, 253, 251, 0.96);
+  overflow: hidden;
+}
+
+.preference-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(22, 36, 52, 0.08);
+}
+
+.preference-header h2 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.preference-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+}
+
+.preference-control {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-radius: 16px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(22, 36, 52, 0.08);
+}
+
+.preference-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.preference-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.preference-title {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.preference-strength {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--accent-strong);
+}
+
+.preference-target {
+  color: #334a5e;
+  font-size: 0.9rem;
+}
+
+.preference-description {
+  line-height: 1.4;
+}
+
+.preference-slider {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.preference-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 0 14px 14px;
+  flex-wrap: wrap;
+}
+
+.preference-apply-button {
+  box-shadow: 0 12px 28px rgba(14, 107, 92, 0.18);
+}
+
 .reset-button {
   border: 1px solid rgba(22, 36, 52, 0.12);
   border-radius: 999px;

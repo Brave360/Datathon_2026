@@ -3,6 +3,7 @@ from unittest.mock import patch
 from pathlib import Path
 
 from app.models.schemas import ConversationTurn, HardFilters
+from app.harness.search_service import build_score_weight_controls
 from app.participant.hard_fact_extraction import extract_hard_facts
 from app.participant.query_parser import _build_messages
 from app.participant.ranking import rank_listings
@@ -186,3 +187,68 @@ def test_query_parser_includes_conversation_before_latest_user_turn() -> None:
         {"role": "assistant", "content": "Previous hard filters: Zurich, balcony"},
         {"role": "user", "content": "make it cheaper"},
     ]
+
+
+def test_build_score_weight_controls_only_exposes_active_soft_components() -> None:
+    controls = build_score_weight_controls(
+        effective_soft_filters={
+            "max_price": 3200,
+            "min_area": 75,
+            "feature_balcony": True,
+            "city": "Zurich",
+            "points_of_interest": [
+                {"query": "Migros Zurich", "type": "supermarket", "radius_km": 0.5},
+                {"query": "ETH Zurich", "type": "university", "radius_km": 1.0},
+            ],
+        },
+        current_weights={"numeric": 1.4, "poi": 1.7},
+    )
+
+    assert [control["key"] for control in controls] == [
+        "text",
+        "poi",
+        "feature",
+        "numeric",
+    ]
+    assert controls[0]["label"] == "Text"
+    assert controls[1]["weight"] == 1.7
+    assert controls[2]["label"] == "Features"
+    assert controls[3]["weight"] == 1.4
+
+
+def test_rank_listings_uses_component_weights_for_reranking() -> None:
+    candidates = [
+        {
+            "listing_id": "1",
+            "title": "Budget flat",
+            "description": "A compact flat",
+            "price": 2800,
+            "rooms": 2.0,
+            "area": 60,
+        },
+        {
+            "listing_id": "2",
+            "title": "Sunny designer loft",
+            "description": "A spacious flat with strong text match",
+            "price": 3200,
+            "rooms": 2.0,
+            "area": 90,
+        },
+    ]
+    soft_facts = {"max_price": 2800, "min_area": 90}
+
+    numeric_first = rank_listings(
+        candidates,
+        soft_facts,
+        query_text="designer loft",
+        component_weights={"numeric": 2.0, "text": 0.1},
+    )
+    text_first = rank_listings(
+        candidates,
+        soft_facts,
+        query_text="designer loft",
+        component_weights={"numeric": 0.1, "text": 2.0},
+    )
+
+    assert numeric_first[0].listing_id == "1"
+    assert text_first[0].listing_id == "2"

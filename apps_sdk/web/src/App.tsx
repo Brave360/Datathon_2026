@@ -33,6 +33,8 @@ type ToolOutput = {
     effective_hard_filters?: unknown;
     effective_soft_filters?: unknown;
     extracted_hard_filters?: unknown;
+    score_component_weights?: Record<string, number>;
+    score_weight_controls?: ScoreWeightControl[];
     [key: string]: unknown;
   };
 };
@@ -45,6 +47,22 @@ type ConversationTurn = {
 type ConversationHistoryResponse = {
   conversation_id: string;
   messages: ConversationTurn[];
+};
+
+type ScoreWeightControl = {
+  key: string;
+  label: string;
+  description: string;
+  weight: number;
+  min_weight: number;
+  max_weight: number;
+  default_weight: number;
+};
+
+type SearchContext = {
+  query: string;
+  conversation: ConversationTurn[];
+  limit: number;
 };
 
 function createConversationId(): string {
@@ -111,6 +129,10 @@ export default function App() {
   const [historyMessages, setHistoryMessages] = useState<ConversationTurn[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(true);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [scoreComponentWeights, setScoreComponentWeights] = useState<Record<string, number>>({});
+  const [draftScoreComponentWeights, setDraftScoreComponentWeights] = useState<Record<string, number>>({});
+  const [lastSearchContext, setLastSearchContext] = useState<SearchContext | null>(null);
+  const [isApplyingPreferenceChanges, setIsApplyingPreferenceChanges] = useState(false);
   const [mode, setMode] = useState<"browser" | "mcp">(() =>
     readToolOutput().listings?.length ? "mcp" : "browser",
   );
@@ -155,6 +177,7 @@ export default function App() {
   const extractedHardFilters =
     toolOutput.meta?.effective_hard_filters ?? toolOutput.meta?.extracted_hard_filters ?? {};
   const extractedSoftFilters = toolOutput.meta?.effective_soft_filters ?? {};
+  const scoreWeightControls = toolOutput.meta?.score_weight_controls ?? [];
   const hasToolResults = results.length > 0;
   const shouldShowNoResultsWarning =
     mode === "browser" && !isLoading && !errorMessage && query.trim() === "" && !results.length;
@@ -175,6 +198,38 @@ export default function App() {
     () => results.find((result) => result.listing_id === selectedId) ?? null,
     [results, selectedId],
   );
+  const hasPreferenceWeightChanges = useMemo(
+    () =>
+      scoreWeightControls.some(
+        (control) =>
+          Math.abs((draftScoreComponentWeights[control.key] ?? control.default_weight) - (scoreComponentWeights[control.key] ?? control.default_weight)) >
+          0.001,
+      ),
+    [draftScoreComponentWeights, scoreComponentWeights, scoreWeightControls],
+  );
+
+  useEffect(() => {
+    if (!scoreWeightControls.length) {
+      setScoreComponentWeights({});
+      setDraftScoreComponentWeights({});
+      return;
+    }
+
+    setScoreComponentWeights((current) => {
+      const next: Record<string, number> = {};
+      for (const control of scoreWeightControls) {
+        next[control.key] = toolOutput.meta?.score_component_weights?.[control.key] ?? current[control.key] ?? control.weight ?? control.default_weight;
+      }
+      return next;
+    });
+    setDraftScoreComponentWeights((current) => {
+      const next: Record<string, number> = {};
+      for (const control of scoreWeightControls) {
+        next[control.key] = current[control.key] ?? toolOutput.meta?.score_component_weights?.[control.key] ?? control.weight ?? control.default_weight;
+      }
+      return next;
+    });
+  }, [scoreWeightControls, toolOutput.meta?.score_component_weights]);
 
   async function fetchHistory(nextConversationId: string): Promise<void> {
     setIsHistoryLoading(true);
@@ -220,6 +275,7 @@ export default function App() {
           query: nextQuery,
           conversation_id: conversationId,
           conversation,
+          soft_preference_weights: scoreComponentWeights,
           limit: nextLimit,
           offset: 0,
         }),
@@ -233,6 +289,11 @@ export default function App() {
       const payload = (await response.json()) as ToolOutput;
       const assistantSummary = payload.meta?.assistant_summary ?? buildAssistantSummary(payload);
       setToolOutput(payload);
+      setLastSearchContext({
+        query: nextQuery,
+        conversation,
+        limit: nextLimit,
+      });
       const nextTurns = [
         { role: "user" as const, content: nextQuery },
         { role: "assistant" as const, content: assistantSummary },
@@ -261,10 +322,50 @@ export default function App() {
     setConversationId(createConversationId());
     setHistoryMessages([]);
     setIsHistoryOpen(true);
+    setScoreComponentWeights({});
+    setDraftScoreComponentWeights({});
+    setLastSearchContext(null);
     setToolOutput({});
     setErrorMessage(null);
     setMode("browser");
     setSelectedId(null);
+  }
+
+  async function applyPreferenceChanges(): Promise<void> {
+    if (!lastSearchContext || !scoreWeightControls.length) {
+      return;
+    }
+
+    setIsApplyingPreferenceChanges(true);
+    setErrorMessage(null);
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/listings/rerank`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: lastSearchContext.query,
+          conversation_id: conversationId,
+          conversation: lastSearchContext.conversation,
+          soft_preference_weights: draftScoreComponentWeights,
+          limit: lastSearchContext.limit,
+          offset: 0,
+        }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `Request failed with status ${response.status}`);
+      }
+
+      const payload = (await response.json()) as ToolOutput;
+      setToolOutput(payload);
+      setScoreComponentWeights({ ...draftScoreComponentWeights });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      setErrorMessage(message);
+    } finally {
+      setIsApplyingPreferenceChanges(false);
+    }
   }
 
   async function toggleHistory(): Promise<void> {
@@ -374,6 +475,64 @@ export default function App() {
               </div>
             ) : null}
 
+            {scoreWeightControls.length ? (
+              <div className="preference-panel">
+                <div className="preference-header">
+                  <h2>Tune reranking balance</h2>
+                  <span className="muted">Adjust how much each kind of soft preference should influence the ranking</span>
+                </div>
+                <div className="preference-controls">
+                  {scoreWeightControls.map((control) => {
+                    const value = draftScoreComponentWeights[control.key] ?? control.default_weight;
+                    return (
+                      <label key={control.key} className="preference-control">
+                        <div className="preference-copy">
+                          <div className="preference-title-row">
+                            <span className="preference-title">{control.label}</span>
+                            <span className="preference-strength">{describeWeight(value)}</span>
+                          </div>
+                          <div className="muted preference-description">{control.description}</div>
+                        </div>
+                        <input
+                          className="preference-slider"
+                          type="range"
+                          min={control.min_weight}
+                          max={control.max_weight}
+                          step={0.1}
+                          value={value}
+                          onChange={(event) =>
+                            setDraftScoreComponentWeights((current) => ({
+                              ...current,
+                              [control.key]: Number(event.target.value),
+                            }))
+                          }
+                        />
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="preference-actions">
+                  <button
+                    className="search-button preference-apply-button"
+                    type="button"
+                    disabled={isApplyingPreferenceChanges || !hasPreferenceWeightChanges}
+                    onClick={() => void applyPreferenceChanges()}
+                  >
+                    {isApplyingPreferenceChanges ? "Updating ranking..." : "Apply preference changes"}
+                  </button>
+                  {hasPreferenceWeightChanges ? (
+                    <button
+                      className="reset-button"
+                      type="button"
+                      onClick={() => setDraftScoreComponentWeights({ ...scoreComponentWeights })}
+                    >
+                      Reset unsaved changes
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
             {errorMessage ? <div className="error-banner">{errorMessage}</div> : null}
             {shouldShowNoResultsWarning ? (
               <div className="error-banner">
@@ -436,4 +595,20 @@ function buildAssistantSummary(payload: ToolOutput): string {
   const extractedSoftFilters = payload.meta?.effective_soft_filters ?? {};
   const resultCount = Array.isArray(payload.listings) ? payload.listings.length : 0;
   return `Previous hard filters: ${JSON.stringify(extractedHardFilters)}. Previous soft filters: ${JSON.stringify(extractedSoftFilters)}. Returned ${resultCount} listings.`;
+}
+
+function describeWeight(value: number): string {
+  if (value <= 0.2) {
+    return "Off";
+  }
+  if (value < 0.8) {
+    return "Light";
+  }
+  if (value < 1.3) {
+    return "Balanced";
+  }
+  if (value < 1.7) {
+    return "Strong";
+  }
+  return "Very strong";
 }
