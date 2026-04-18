@@ -205,7 +205,7 @@ def _poi_score(
     components: list[float] = []
     for poi_lat, poi_lon, radius_km in poi_locations:
         dist = geodesic((lat, lon), (poi_lat, poi_lon)).km
-        score = 1.0 / (1.0 + (dist / max(radius_km, 0.1)) ** 2)
+        score = math.exp(-0.5 * (dist / 3.0) ** 2)
         components.append(score)
 
     return sum(components) / len(components)
