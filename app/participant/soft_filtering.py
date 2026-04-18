@@ -10,11 +10,16 @@ from geopy.geocoders import Nominatim
 from opensearchpy import OpenSearch, RequestsHttpConnection
 from requests_aws4auth import AWS4Auth
 
-# ── Semantic Score (Description) ───────────────────────────────────────────────
+# ── Semantic Score ───────────────────────────────────────────────
 
 INDEX_NAME = "description"
 EMBEDDING_MODEL_ID = "amazon.titan-embed-text-v2:0"
 EMBEDDING_DIMS = 256
+
+IMAGE_INDEX_NAME = "images"
+IMAGE_EMBEDDING_MODEL_ID = "amazon.titan-embed-image-v1"
+IMAGE_EMBEDDING_DIMS = 256
+
 OPENSEARCH_ENDPOINT = "https://rwjzlgc3jmnsm1knq1w2.us-west-2.aoss.amazonaws.com"
 AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "us-west-2")
 
@@ -42,6 +47,15 @@ def _embed(text: str) -> list[float]:
     response = _bedrock.invoke_model(modelId=EMBEDDING_MODEL_ID, body=body)
     return json.loads(response["body"].read())["embedding"]
 
+
+def _embed_text_as_image(text: str) -> list[float]:
+    body = json.dumps({
+        "inputText": text[:512],
+        "embeddingConfig": {"outputEmbeddingLength": IMAGE_EMBEDDING_DIMS},
+    })
+    response = _bedrock.invoke_model(modelId=IMAGE_EMBEDDING_MODEL_ID, body=body)
+    return json.loads(response["body"].read())["embedding"]
+
 def semantic_score_desc(query: str, candidates: list[dict]) -> dict[str, float]:
     """Returns a mapping of listing_id -> semantic similarity score for each candidate."""
     K = 250
@@ -63,8 +77,33 @@ def semantic_score_desc(query: str, candidates: list[dict]) -> dict[str, float]:
     )
     
     scores = {hit["_source"]["listing_id"]: hit["_score"] for hit in response["hits"]["hits"]}
-    min_score = min(scores.values()) * 0.75
+    min_score = min(scores.values()) * 0.75 if scores else 0.0
     return {c["listing_id"]: scores.get(c["listing_id"], min_score) for c in candidates}
+
+def semantic_score_images(query: str, candidates: list[dict]) -> dict[str, float]:
+    """Returns a mapping of listing_id -> image similarity score for each candidate."""
+    K = 250
+    query_vector = _embed_text_as_image(query)
+    response = _os_client.search(
+        index=IMAGE_INDEX_NAME,
+        body={
+            "size": K,
+            "query": {
+                "knn": {
+                    "image_embedding": {
+                        "vector": query_vector,
+                        "k": K,
+                    }
+                }
+            },
+            "_source": ["listing_id"],
+        },
+    )
+
+    scores = {hit["_source"]["listing_id"]: hit["_score"] for hit in response["hits"]["hits"]}
+    min_score = min(scores.values()) * 0.75 if scores else 0.0
+    return {c["listing_id"]: scores.get(c["listing_id"], min_score) for c in candidates}
+
 
 # ── Distance Score ───────────────────────────────────────────────
 
