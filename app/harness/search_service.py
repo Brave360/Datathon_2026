@@ -9,7 +9,7 @@ from app.core.hard_filters import HardFilterParams, search_listings
 from app.models.schemas import ConversationTurn, HardFilters, ListingsResponse
 from app.participant.hard_filter import search_with_relaxation
 from app.participant.query_parser import parse_query
-from app.participant.ranking import rank_listings
+from app.participant.ranking import HAS_IMAGE_SCORING, rank_listings
 from app.participant.soft_fact_extraction import extract_soft_facts
 from app.participant.soft_filtering import filter_soft_facts
 
@@ -163,6 +163,10 @@ _SCORE_COMPONENT_CONFIG: dict[str, dict[str, str]] = {
         "label": "Features",
         "description": "How strongly soft features like pets allowed, elevator, balcony, or furnished should affect reranking.",
     },
+    "image": {
+        "label": "Images",
+        "description": "How strongly visual similarity of listing images should affect reranking.",
+    },
 }
 
 
@@ -186,6 +190,7 @@ def build_score_weight_controls(
 ) -> list[dict[str, Any]]:
     active_components = {
         "text": True,
+        "image": HAS_IMAGE_SCORING,
         "poi": bool(effective_soft_filters.get("points_of_interest")),
         "feature": any(
             effective_soft_filters.get(key) is not None

@@ -16,10 +16,11 @@ LOGGER = logging.getLogger(__name__)
 
 # Base weights used when every component has signal; rebalanced dynamically otherwise
 _BASE_WEIGHTS = {
-    "text":    0.30,
+    "text":    0.25,
     "poi":     0.35,
     "feature": 0.20,
     "numeric": 0.15,
+    "image":   0.07,
 }
 
 _MAX_CANDIDATES = 200
@@ -42,12 +43,16 @@ _STOP_WORDS = {
 # Attempt to load AWS semantic search; falls back to keyword matching if unavailable
 try:
     from app.participant.soft_filtering import semantic_score_desc as _aws_semantic_score
+    from app.participant.soft_filtering import semantic_score_images as _aws_image_score
     _HAS_SEMANTIC = True
     LOGGER.info("AWS semantic search loaded successfully")
 except Exception as _e:
     _aws_semantic_score = None  # type: ignore[assignment]
+    _aws_image_score = None  # type: ignore[assignment]
     _HAS_SEMANTIC = False
     LOGGER.info("AWS semantic search unavailable (%s), using keyword fallback", _e)
+
+HAS_IMAGE_SCORING = _HAS_SEMANTIC
 
 
 def rank_listings(
@@ -61,13 +66,14 @@ def rank_listings(
 
     pool = candidates[:_MAX_CANDIDATES] if len(candidates) > _MAX_CANDIDATES else candidates
 
-    # Build text scores once for the whole pool
+    # Build text and image scores once for the whole pool
     text_scores = _build_text_scores(pool, query_text, soft_facts)
+    image_scores = _build_image_scores(pool, query_text)
     poi_locations = _geocode_pois(soft_facts.get("points_of_interest") or [])
 
     scored: list[tuple[float, dict[str, float], dict[str, Any]]] = []
     for candidate in pool:
-        s, breakdown = _score(candidate, soft_facts, text_scores, poi_locations, component_weights or {})
+        s, breakdown = _score(candidate, soft_facts, text_scores, poi_locations, component_weights or {}, image_scores)
         scored.append((s, breakdown, candidate))
 
     scored.sort(key=lambda x: x[0], reverse=True)
@@ -108,12 +114,30 @@ def _build_text_scores(
     return {c["listing_id"]: _keyword_score(c, query_terms) for c in pool}
 
 
+def _build_image_scores(
+    pool: list[dict[str, Any]],
+    query_text: str,
+) -> dict[Any, float]:
+    """Returns listing_id -> image similarity score [0, 1] for all candidates."""
+    if not (_HAS_SEMANTIC and query_text):
+        return {}
+    try:
+        raw = _aws_image_score(query_text, pool)
+        if raw:
+            max_s = max(raw.values()) or 1.0
+            return {lid: s / max_s for lid, s in raw.items()}
+    except Exception as exc:
+        LOGGER.warning("Image semantic scoring failed: %s", exc)
+    return {}
+
+
 def _score(
     candidate: dict[str, Any],
     soft_facts: dict[str, Any],
     text_scores: dict[Any, float],
     poi_locations: list[tuple[float, float, float, str]],
     component_weights: dict[str, float],
+    image_scores: dict[Any, float],
 ) -> tuple[float, dict[str, float]]:
     has_features = bool({f for f in _BOOLEAN_FEATURE_FIELDS if soft_facts.get(f) is not None})
     has_numeric = any(
@@ -134,6 +158,7 @@ def _score(
         )
     )
     has_poi = bool(poi_locations)
+    has_image = bool(image_scores)
     # text always has signal (semantic scores vary across candidates)
 
     active = {
@@ -141,6 +166,7 @@ def _score(
         "poi":     has_poi,
         "feature": has_features,
         "numeric": has_numeric,
+        "image":   has_image,
     }
     raw_weights = {
         key: (_normalized_component_weight(component_weights, key) if active[key] else 0.0)
@@ -158,17 +184,20 @@ def _score(
     poi_s     = _poi_score(candidate, poi_locations) if has_poi else None
     feature_s = _feature_score(candidate, soft_facts) if has_features else None
     numeric_s = _numeric_score(candidate, soft_facts) if has_numeric else None
+    image_s   = image_scores.get(candidate["listing_id"], 0.5) if has_image else None
 
     total = weights["text"] * text_s
     if poi_s     is not None: total += weights["poi"]     * poi_s
     if feature_s is not None: total += weights["feature"] * feature_s
     if numeric_s is not None: total += weights["numeric"] * numeric_s
+    if image_s   is not None: total += weights["image"]   * image_s
 
     breakdown = {
         "text":    text_s,
         **({"poi":     poi_s}     if poi_s     is not None else {}),
         **({"feature": feature_s} if feature_s is not None else {}),
         **({"numeric": numeric_s} if numeric_s is not None else {}),
+        **({"image":   image_s}   if image_s   is not None else {}),
     }
     return total, breakdown
 
