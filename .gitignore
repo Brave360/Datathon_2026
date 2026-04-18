@@ -15,3 +15,10 @@ htmlcov/
 
 apps_sdk/web/node_modules/
 apps_sdk/web/dist/
+
+
+# CESC
+CLAUDE.md
+
+# Data
+raw_data/
