@@ -62,7 +62,7 @@ def query_from_text(
         listings=ranked,
         meta={
             "effective_hard_filters": result.effective_hard.model_dump(exclude_none=True),
-            "effective_soft_filters": result.effective_soft.model_dump(exclude_none=True),
+            "effective_soft_filters": soft_dict,
             "relaxation_log": result.relaxation_log,
             "total_before_page": result.total_before_page,
             "conversation_turn_count": len(conversation) + 1,
