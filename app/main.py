@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 import logging
+import os
 import time
 
 from fastapi import FastAPI
@@ -15,12 +16,39 @@ from app.config import get_settings
 from app.harness.bootstrap import bootstrap_database
 
 LOGGER = logging.getLogger(__name__)
-ALLOWED_CORS_ORIGINS = [
+DEFAULT_CORS_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+    "http://localhost:8081",
+    "http://127.0.0.1:8081",
     "http://localhost:8001",
     "http://127.0.0.1:8001",
 ]
+
+
+def _cors_settings() -> dict[str, object]:
+    if os.getenv("LISTINGS_ALLOW_ALL_CORS", "").lower() in {"1", "true", "yes"}:
+        return {
+            "allow_origins": ["*"],
+            "allow_credentials": False,
+            "allow_methods": ["*"],
+            "allow_headers": ["*"],
+        }
+
+    configured_origins = os.getenv("LISTINGS_CORS_ORIGINS")
+    if configured_origins:
+        origins = [item.strip() for item in configured_origins.split(",") if item.strip()]
+    else:
+        origins = DEFAULT_CORS_ORIGINS
+
+    return {
+        "allow_origins": origins,
+        "allow_credentials": False,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+    }
 
 
 @asynccontextmanager
@@ -41,13 +69,7 @@ app = FastAPI(
     title="Datathon 2026 Listings Harness",
     lifespan=lifespan,
 )
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_CORS_ORIGINS,
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(CORSMiddleware, **_cors_settings())
 app.include_router(listings_router)
 
 
