@@ -4,6 +4,7 @@ from pathlib import Path
 
 from app.models.schemas import ConversationTurn, HardFilters
 from app.participant.hard_fact_extraction import extract_hard_facts
+from app.participant.query_parser import _build_messages
 from app.participant.ranking import rank_listings
 from app.participant.soft_fact_extraction import extract_soft_facts
 from app.participant.soft_filtering import filter_soft_facts
@@ -169,3 +170,19 @@ def test_harness_service_converts_hard_filters_to_search_params() -> None:
     assert params.max_area_sqm == 90
     assert params.limit == 5
     assert params.offset == 2
+
+
+def test_query_parser_includes_conversation_before_latest_user_turn() -> None:
+    messages = _build_messages(
+        query="make it cheaper",
+        conversation=[
+            ConversationTurn(role="user", content="3 room flat in Zurich with balcony"),
+            ConversationTurn(role="assistant", content="Previous hard filters: Zurich, balcony"),
+        ],
+    )
+
+    assert messages == [
+        {"role": "user", "content": "3 room flat in Zurich with balcony"},
+        {"role": "assistant", "content": "Previous hard filters: Zurich, balcony"},
+        {"role": "user", "content": "make it cheaper"},
+    ]

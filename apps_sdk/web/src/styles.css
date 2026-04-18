@@ -183,6 +183,72 @@ body {
   gap: 12px;
 }
 
+.history-panel {
+  border-radius: 20px;
+  border: 1px solid rgba(22, 36, 52, 0.08);
+  background: rgba(255, 255, 255, 0.9);
+  overflow: hidden;
+}
+
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(22, 36, 52, 0.08);
+}
+
+.history-header h2 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 14px;
+}
+
+.history-message {
+  border-radius: 16px;
+  padding: 12px 13px;
+  border: 1px solid rgba(22, 36, 52, 0.08);
+  background: rgba(247, 250, 252, 0.95);
+}
+
+.history-message.user {
+  border-color: rgba(14, 107, 92, 0.18);
+  background: rgba(230, 245, 241, 0.7);
+}
+
+.history-message.assistant {
+  border-color: rgba(201, 106, 61, 0.18);
+  background: rgba(255, 246, 241, 0.82);
+}
+
+.history-role {
+  margin-bottom: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #587084;
+}
+
+.history-content {
+  white-space: pre-wrap;
+  line-height: 1.45;
+  color: #284053;
+}
+
+.history-empty {
+  padding: 2px 2px 6px;
+}
+
 .reset-button {
   border: 1px solid rgba(22, 36, 52, 0.12);
   border-radius: 999px;
@@ -234,6 +300,26 @@ body {
   overflow: hidden;
 }
 
+.filters-sections {
+  display: grid;
+  gap: 1px;
+  background: rgba(22, 36, 52, 0.08);
+}
+
+.filter-section {
+  background: rgba(247, 250, 252, 0.96);
+}
+
+.filter-section-header {
+  padding: 10px 14px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #476174;
+  border-bottom: 1px solid rgba(22, 36, 52, 0.08);
+}
+
 .filters-header {
   display: flex;
   justify-content: space-between;
@@ -264,7 +350,7 @@ body {
 .filters-code {
   margin: 0;
   padding: 14px;
-  max-height: 180px;
+  max-height: 220px;
   overflow: auto;
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 0.76rem;

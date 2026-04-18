@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 import anthropic
 
 from app.config import get_settings
+from app.models.schemas import ConversationTurn
 
 
 class PointOfInterest(BaseModel):
@@ -43,6 +44,7 @@ class Requirements(BaseModel):
     feature_wheelchair_accessible: bool | None = Field(None)
     feature_private_laundry: bool | None = Field(None)
     feature_minergie_certified: bool | None = Field(None)
+    is_furnished: bool | None = Field(None, description="True if furnished, False if explicitly unfurnished")
     points_of_interest: list[PointOfInterest] = Field(
         default_factory=list,
         description="Nearby places the user wants to be close to",
@@ -74,10 +76,14 @@ Database schema (SQLite table `listings`):
   feature_child_friendly, feature_pets_allowed, feature_temporary, feature_new_build,
   feature_wheelchair_accessible, feature_private_laundry, feature_minergie_certified
   (INTEGER 0/1 or NULL)
+- is_furnished (INTEGER 0/1): derived from title/description/category; use this when
+  the user mentions wanting a furnished or unfurnished property
 - bedrooms, bathrooms (integers)
 - year_built, last_renovation (integers)
 - offer_type (TEXT: "RENT" or "BUY")
-- object_category (TEXT: "APARTMENT", "HOUSE", etc.)
+- object_category (TEXT: "APARTMENT", "HOUSE", "STUDIO", "ROOM", "LOFT",
+  "GARAGE", "PARKING", "COMMERCIAL", "VACATION", "STORAGE", "LAND", "OTHER")
+  Note: furnished is captured by is_furnished, not by object_category.
 
 Rules:
 1. Hard requirements: the user explicitly states a constraint as mandatory (must, only, maximum,
@@ -85,8 +91,17 @@ Rules:
 2. Soft requirements: the user expresses a preference, wish, or nice-to-have. Listings matching
    more soft requirements rank higher.
 3. If a requirement is ambiguous, place it in soft_requirements.
-4. For points_of_interest: if the user mentions wanting to be near any place — a category, a
-   specific chain, or a named landmark — add an entry.
+4. When prior conversation turns are present, treat the latest user message as a modification to
+   the existing search unless it clearly starts over. Preserve earlier constraints and preferences
+   by default, and change only the parts the user explicitly changes.
+   Example: previous search says "Zurich with balcony under 3200 CHF" and the latest user says
+   "make it cheaper" -> keep Zurich and balcony, lower the budget.
+   Example: previous search says "3-room apartment in Zurich" and the latest user says
+   "actually in Winterthur" -> replace Zurich with Winterthur.
+5. points_of_interest MUST always go in soft_requirements, never in hard_requirements.
+   Proximity cannot be filtered in the database — it is scored at ranking time.
+   If the user mentions wanting to be near any place — a category, a specific chain, or a
+   named landmark — add an entry to soft_requirements.points_of_interest.
    - Category (generic): set `type` to the category and `query` to "<category> <city>".
      Examples: school → `{"type":"school","query":"primary school Bern","radius_km":0.5}`
                hospital → `{"type":"hospital","query":"hospital Zurich","radius_km":2.0}`
@@ -99,7 +114,7 @@ Rules:
      Example: "ETH Zurich Zentrum" → `{"type":"university","query":"ETH Zurich Zentrum","radius_km":1.0}`
    - If no city context is available, keep `query` as specific as possible without inventing a city.
    - Set `radius_km` to whatever the user specifies, or 1.0 by default.
-5. Set unmentioned fields to null / empty list — do not invent values.
+6. Set unmentioned fields to null / empty list — do not invent values.
 """
 
 
@@ -116,7 +131,11 @@ _REQUIREMENTS_SCHEMA = {
         "min_area": {"type": ["number", "null"]},
         "max_area": {"type": ["number", "null"]},
         "offer_type": {"type": ["string", "null"], "enum": ["RENT", "BUY", None]},
-        "object_category": {"type": ["string", "null"]},
+        "object_category": {
+            "type": ["string", "null"],
+            "enum": ["APARTMENT", "HOUSE", "STUDIO", "ROOM", "LOFT",
+                     "GARAGE", "PARKING", "COMMERCIAL", "VACATION", "STORAGE", "LAND", "OTHER", None],
+        },
         "min_bedrooms": {"type": ["integer", "null"]},
         "max_bedrooms": {"type": ["integer", "null"]},
         "min_bathrooms": {"type": ["integer", "null"]},
@@ -135,6 +154,7 @@ _REQUIREMENTS_SCHEMA = {
         "feature_wheelchair_accessible": {"type": ["boolean", "null"]},
         "feature_private_laundry": {"type": ["boolean", "null"]},
         "feature_minergie_certified": {"type": ["boolean", "null"]},
+        "is_furnished": {"type": ["boolean", "null"]},
         "points_of_interest": {
             "type": "array",
             "items": {
@@ -164,7 +184,22 @@ _TOOL = {
 }
 
 
-def parse_query(query: str) -> ParsedQuery:
+def _build_messages(
+    *,
+    query: str,
+    conversation: list[ConversationTurn] | None = None,
+) -> list[dict[str, str]]:
+    messages: list[dict[str, str]] = []
+    for turn in conversation or []:
+        messages.append({"role": turn.role, "content": turn.content})
+    messages.append({"role": "user", "content": query})
+    return messages
+
+
+def parse_query(
+    query: str,
+    conversation: list[ConversationTurn] | None = None,
+) -> ParsedQuery:
     settings = get_settings()
     client = anthropic.Anthropic(
         api_key=settings.claude_api_key,
@@ -176,7 +211,7 @@ def parse_query(query: str) -> ParsedQuery:
         system=_SYSTEM_PROMPT,
         tools=[_TOOL],
         tool_choice={"type": "auto"},
-        messages=[{"role": "user", "content": query}],
+        messages=_build_messages(query=query, conversation=conversation),
     )
     tool_block = next(b for b in response.content if b.type == "tool_use")
     data = tool_block.input
@@ -186,8 +221,11 @@ def parse_query(query: str) -> ParsedQuery:
     )
 
 
-def parse_query_to_dict(query: str) -> dict[str, Any]:
-    result = parse_query(query)
+def parse_query_to_dict(
+    query: str,
+    conversation: list[ConversationTurn] | None = None,
+) -> dict[str, Any]:
+    result = parse_query(query, conversation=conversation)
     return result.model_dump(exclude_none=False)
 
 

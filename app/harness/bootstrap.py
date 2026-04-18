@@ -22,6 +22,7 @@ def bootstrap_database(*, db_path: Path, raw_data_dir: Path) -> None:
                 db_path,
             )
             return
+        _ensure_is_furnished(db_path)
         return
 
     csv_paths = _csv_paths(raw_data_dir)
@@ -30,6 +31,8 @@ def bootstrap_database(*, db_path: Path, raw_data_dir: Path) -> None:
         create_schema(connection)
         import_csvs(connection, csv_paths)
         create_indexes(connection)
+
+    _ensure_is_furnished(db_path)
 
 
 def _csv_paths(raw_data_dir: Path) -> list[Path]:
@@ -40,6 +43,12 @@ def _csv_paths(raw_data_dir: Path) -> list[Path]:
     if not csv_paths:
         raise FileNotFoundError(f"No CSV files found in raw data directory: {raw_data_dir}")
     return csv_paths
+
+
+def _ensure_is_furnished(db_path: Path) -> None:
+    """Add and populate is_furnished column if it doesn't exist or is empty."""
+    from app.harness.is_furnished_migration import run_migration
+    run_migration(db_path)
 
 
 def _schema_matches(db_path: Path) -> bool:

@@ -28,13 +28,31 @@ type RankedListingResult = {
 
 type ToolOutput = {
   listings?: RankedListingResult[];
-  meta?: Record<string, unknown>;
+  meta?: {
+    assistant_summary?: string;
+    effective_hard_filters?: unknown;
+    effective_soft_filters?: unknown;
+    extracted_hard_filters?: unknown;
+    [key: string]: unknown;
+  };
 };
 
 type ConversationTurn = {
   role: "user" | "assistant";
   content: string;
 };
+
+type ConversationHistoryResponse = {
+  conversation_id: string;
+  messages: ConversationTurn[];
+};
+
+function createConversationId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `conversation-${Date.now()}`;
+}
 
 declare global {
   interface Window {
@@ -89,6 +107,10 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [conversation, setConversation] = useState<ConversationTurn[]>([]);
+  const [conversationId, setConversationId] = useState(() => createConversationId());
+  const [historyMessages, setHistoryMessages] = useState<ConversationTurn[]>([]);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(true);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [mode, setMode] = useState<"browser" | "mcp">(() =>
     readToolOutput().listings?.length ? "mcp" : "browser",
   );
@@ -130,7 +152,9 @@ export default function App() {
   }, []);
 
   const results = toolOutput.listings ?? [];
-  const extractedHardFilters = toolOutput.meta?.extracted_hard_filters;
+  const extractedHardFilters =
+    toolOutput.meta?.effective_hard_filters ?? toolOutput.meta?.extracted_hard_filters ?? {};
+  const extractedSoftFilters = toolOutput.meta?.effective_soft_filters ?? {};
   const hasToolResults = results.length > 0;
   const shouldShowNoResultsWarning =
     mode === "browser" && !isLoading && !errorMessage && query.trim() === "" && !results.length;
@@ -152,6 +176,37 @@ export default function App() {
     [results, selectedId],
   );
 
+  async function fetchHistory(nextConversationId: string): Promise<void> {
+    setIsHistoryLoading(true);
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/listings/history/${nextConversationId}`);
+      if (!response.ok) {
+        if (response.status === 404) {
+          setHistoryMessages([]);
+          return;
+        }
+        const text = await response.text();
+        throw new Error(text || `Request failed with status ${response.status}`);
+      }
+
+      const payload = (await response.json()) as ConversationHistoryResponse;
+      setHistoryMessages(payload.messages ?? []);
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!isHistoryOpen) {
+      return;
+    }
+
+    void fetchHistory(conversationId).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      setErrorMessage(message);
+    });
+  }, [conversationId, isHistoryOpen]);
+
   async function runSearch(nextQuery: string, nextLimit: number): Promise<void> {
     setIsLoading(true);
     setErrorMessage(null);
@@ -163,6 +218,7 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: nextQuery,
+          conversation_id: conversationId,
           conversation,
           limit: nextLimit,
           offset: 0,
@@ -175,15 +231,16 @@ export default function App() {
       }
 
       const payload = (await response.json()) as ToolOutput;
+      const assistantSummary = payload.meta?.assistant_summary ?? buildAssistantSummary(payload);
       setToolOutput(payload);
-      setConversation((current) => [
-        ...current,
-        { role: "user", content: nextQuery },
-        {
-          role: "assistant",
-          content: buildAssistantSummary(payload),
-        },
-      ]);
+      const nextTurns = [
+        { role: "user" as const, content: nextQuery },
+        { role: "assistant" as const, content: assistantSummary },
+      ];
+      setConversation((current) => [...current, ...nextTurns]);
+      if (isHistoryOpen) {
+        await fetchHistory(conversationId);
+      }
       setQuery("");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
@@ -201,10 +258,28 @@ export default function App() {
 
   function resetConversation() {
     setConversation([]);
+    setConversationId(createConversationId());
+    setHistoryMessages([]);
+    setIsHistoryOpen(true);
     setToolOutput({});
     setErrorMessage(null);
     setMode("browser");
     setSelectedId(null);
+  }
+
+  async function toggleHistory(): Promise<void> {
+    if (isHistoryOpen) {
+      setIsHistoryOpen(false);
+      return;
+    }
+
+    try {
+      await fetchHistory(conversationId);
+      setIsHistoryOpen(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      setErrorMessage(message);
+    }
   }
 
   return (
@@ -259,11 +334,43 @@ export default function App() {
               </span>
             </div>
 
-            {conversation.length ? (
-              <div className="conversation-toolbar">
-                <button className="reset-button" type="button" onClick={resetConversation}>
-                  New conversation
-                </button>
+            <div className="conversation-toolbar">
+              <button className="reset-button" type="button" onClick={resetConversation}>
+                New conversation
+              </button>
+              <button className="reset-button" type="button" onClick={() => void toggleHistory()}>
+                {isHistoryLoading
+                  ? "Loading history..."
+                  : isHistoryOpen
+                    ? "Hide message history"
+                    : "Show message history"}
+              </button>
+            </div>
+
+            {isHistoryOpen ? (
+              <div className="history-panel">
+                <div className="history-header">
+                  <h2>Message history</h2>
+                  <span className="muted">
+                    {historyMessages.length
+                      ? `${historyMessages.length} message${historyMessages.length === 1 ? "" : "s"}`
+                      : "No messages yet"}
+                  </span>
+                </div>
+                <div className="history-list">
+                  {historyMessages.length ? (
+                    historyMessages.map((message, index) => (
+                      <article key={`${message.role}-${index}`} className={`history-message ${message.role}`}>
+                        <div className="history-role">{message.role}</div>
+                        <div className="history-content">{message.content}</div>
+                      </article>
+                    ))
+                  ) : (
+                    <p className="muted history-empty">
+                      This conversation has not sent any stored messages yet.
+                    </p>
+                  )}
+                </div>
               </div>
             ) : null}
 
@@ -277,14 +384,21 @@ export default function App() {
 
             <div className="filters-panel">
               <div className="filters-header">
-                <h2>Extracted hard filters</h2>
+                <h2>Extracted filters</h2>
                 <span className="muted">
                   {hasToolResults ? "From latest search" : "Will appear after search"}
                 </span>
               </div>
-              <pre className="filters-code">
-                {JSON.stringify(extractedHardFilters ?? {}, null, 2)}
-              </pre>
+              <div className="filters-sections">
+                <section className="filter-section">
+                  <div className="filter-section-header">Hard filters</div>
+                  <pre className="filters-code">{JSON.stringify(extractedHardFilters, null, 2)}</pre>
+                </section>
+                <section className="filter-section">
+                  <div className="filter-section-header">Soft filters</div>
+                  <pre className="filters-code">{JSON.stringify(extractedSoftFilters, null, 2)}</pre>
+                </section>
+              </div>
             </div>
           </section>
 
@@ -318,7 +432,8 @@ export default function App() {
 }
 
 function buildAssistantSummary(payload: ToolOutput): string {
-  const extractedHardFilters = payload.meta?.extracted_hard_filters ?? {};
+  const extractedHardFilters = payload.meta?.effective_hard_filters ?? payload.meta?.extracted_hard_filters ?? {};
+  const extractedSoftFilters = payload.meta?.effective_soft_filters ?? {};
   const resultCount = Array.isArray(payload.listings) ? payload.listings.length : 0;
-  return `Previous hard filters: ${JSON.stringify(extractedHardFilters)}. Returned ${resultCount} listings.`;
+  return `Previous hard filters: ${JSON.stringify(extractedHardFilters)}. Previous soft filters: ${JSON.stringify(extractedSoftFilters)}. Returned ${resultCount} listings.`;
 }
