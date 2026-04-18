@@ -43,6 +43,7 @@ class Requirements(BaseModel):
     feature_wheelchair_accessible: bool | None = Field(None)
     feature_private_laundry: bool | None = Field(None)
     feature_minergie_certified: bool | None = Field(None)
+    is_furnished: bool | None = Field(None, description="True if furnished, False if explicitly unfurnished")
     points_of_interest: list[PointOfInterest] = Field(
         default_factory=list,
         description="Nearby places the user wants to be close to",
@@ -74,10 +75,14 @@ Database schema (SQLite table `listings`):
   feature_child_friendly, feature_pets_allowed, feature_temporary, feature_new_build,
   feature_wheelchair_accessible, feature_private_laundry, feature_minergie_certified
   (INTEGER 0/1 or NULL)
+- is_furnished (INTEGER 0/1): derived from title/description/category; use this when
+  the user mentions wanting a furnished or unfurnished property
 - bedrooms, bathrooms (integers)
 - year_built, last_renovation (integers)
 - offer_type (TEXT: "RENT" or "BUY")
-- object_category (TEXT: "APARTMENT", "HOUSE", etc.)
+- object_category (TEXT: "APARTMENT", "HOUSE", "STUDIO", "ROOM", "LOFT",
+  "GARAGE", "PARKING", "COMMERCIAL", "VACATION", "STORAGE", "LAND", "OTHER")
+  Note: furnished is captured by is_furnished, not by object_category.
 
 Rules:
 1. Hard requirements: the user explicitly states a constraint as mandatory (must, only, maximum,
@@ -116,7 +121,11 @@ _REQUIREMENTS_SCHEMA = {
         "min_area": {"type": ["number", "null"]},
         "max_area": {"type": ["number", "null"]},
         "offer_type": {"type": ["string", "null"], "enum": ["RENT", "BUY", None]},
-        "object_category": {"type": ["string", "null"]},
+        "object_category": {
+            "type": ["string", "null"],
+            "enum": ["APARTMENT", "HOUSE", "STUDIO", "ROOM", "LOFT",
+                     "GARAGE", "PARKING", "COMMERCIAL", "VACATION", "STORAGE", "LAND", "OTHER", None],
+        },
         "min_bedrooms": {"type": ["integer", "null"]},
         "max_bedrooms": {"type": ["integer", "null"]},
         "min_bathrooms": {"type": ["integer", "null"]},
@@ -135,6 +144,7 @@ _REQUIREMENTS_SCHEMA = {
         "feature_wheelchair_accessible": {"type": ["boolean", "null"]},
         "feature_private_laundry": {"type": ["boolean", "null"]},
         "feature_minergie_certified": {"type": ["boolean", "null"]},
+        "is_furnished": {"type": ["boolean", "null"]},
         "points_of_interest": {
             "type": "array",
             "items": {

@@ -6,7 +6,8 @@ from typing import Any
 
 from app.core.hard_filters import HardFilterParams, search_listings
 from app.models.schemas import ConversationTurn, HardFilters, ListingsResponse
-from app.participant.hard_fact_extraction import extract_hard_facts
+from app.participant.hard_filter import search_with_relaxation
+from app.participant.query_parser import parse_query
 from app.participant.ranking import rank_listings
 from app.participant.soft_fact_extraction import extract_soft_facts
 from app.participant.soft_filtering import filter_soft_facts
@@ -33,21 +34,29 @@ def query_from_text(
         limit,
         offset,
     )
-    hard_facts = extract_hard_facts(query, conversation=conversation)
-    hard_facts.limit = limit
-    hard_facts.offset = offset
-    LOGGER.info("query_from_text extracted_hard_facts=%s", hard_facts.model_dump())
-    soft_facts = extract_soft_facts(query)
-    candidates = filter_hard_facts(db_path, hard_facts)
-    LOGGER.info("query_from_text hard_filter_candidates=%s", len(candidates))
-    candidates = filter_soft_facts(candidates, soft_facts)
-    LOGGER.info("query_from_text post_soft_filter_candidates=%s", len(candidates))
-    ranked = rank_listings(candidates, soft_facts)
-    LOGGER.info("query_from_text ranked_results=%s", len(ranked))
+    parsed = parse_query(query)
+    LOGGER.info("query_from_text parsed hard=%s", parsed.hard_requirements.model_dump(exclude_none=True))
+    LOGGER.info("query_from_text parsed soft=%s", parsed.soft_requirements.model_dump(exclude_none=True))
+
+    result = search_with_relaxation(
+        db_path,
+        parsed.hard_requirements,
+        parsed.soft_requirements,
+    )
+    if result.relaxation_log:
+        LOGGER.info("query_from_text relaxation_log=%s", result.relaxation_log)
+    LOGGER.info("query_from_text candidates=%s total=%s", len(result.listings), result.total_before_page)
+
+    ranked = rank_listings(result.listings, result.effective_soft.model_dump(exclude_none=True), query_text=query)
+    ranked = ranked[offset : offset + limit]
+    LOGGER.info("query_from_text ranked_results=%s (limit=%s offset=%s)", len(ranked), limit, offset)
     return ListingsResponse(
         listings=ranked,
         meta={
-            "extracted_hard_filters": hard_facts.model_dump(),
+            "effective_hard_filters": result.effective_hard.model_dump(exclude_none=True),
+            "effective_soft_filters": result.effective_soft.model_dump(exclude_none=True),
+            "relaxation_log": result.relaxation_log,
+            "total_before_page": result.total_before_page,
             "conversation_turn_count": len(conversation) + 1,
         },
     )
