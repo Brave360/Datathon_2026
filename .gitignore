@@ -1,4 +1,3 @@
-raw_data/
 .DS_Store
 .venv/
 .pytest_cache/
@@ -16,10 +15,17 @@ htmlcov/
 apps_sdk/web/node_modules/
 apps_sdk/web/dist/
 
-
 # CESC
 CLAUDE.md
 
 # Data
-raw_data/
 .env
+
+start_all.ps1
+
+# Dev artifacts
+.claude/
+failed_batches.jsonl
+raw_data/__MACOSX/
+raw_data/*.tmp
+raw_data/sred_images/
