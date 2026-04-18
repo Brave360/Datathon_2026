@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.hard_filters import HardFilterParams, search_listings
-from app.models.schemas import HardFilters, ListingsResponse
+from app.models.schemas import ConversationTurn, HardFilters, ListingsResponse
 from app.participant.hard_fact_extraction import extract_hard_facts
 from app.participant.ranking import rank_listings
 from app.participant.soft_fact_extraction import extract_soft_facts
@@ -19,10 +19,11 @@ def query_from_text(
     *,
     db_path: Path,
     query: str,
+    conversation: list[ConversationTurn],
     limit: int,
     offset: int,
 ) -> ListingsResponse:
-    hard_facts = extract_hard_facts(query)
+    hard_facts = extract_hard_facts(query, conversation=conversation)
     hard_facts.limit = limit
     hard_facts.offset = offset
     soft_facts = extract_soft_facts(query)
@@ -32,6 +33,7 @@ def query_from_text(
         listings=rank_listings(candidates, soft_facts),
         meta={
             "extracted_hard_filters": hard_facts.model_dump(),
+            "conversation_turn_count": len(conversation) + 1,
         },
     )
 
@@ -60,6 +62,8 @@ def to_hard_filter_params(hard_facts: HardFilters) -> HardFilterParams:
         max_price=hard_facts.max_price,
         min_rooms=hard_facts.min_rooms,
         max_rooms=hard_facts.max_rooms,
+        min_area_sqm=hard_facts.min_area_sqm,
+        max_area_sqm=hard_facts.max_area_sqm,
         latitude=hard_facts.latitude,
         longitude=hard_facts.longitude,
         radius_km=hard_facts.radius_km,

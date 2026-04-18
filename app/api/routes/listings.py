@@ -25,6 +25,7 @@ def listings(request: ListingsQueryRequest) -> ListingsResponse:
     return query_from_text(
         db_path=settings.db_path,
         query=request.query,
+        conversation=request.conversation,
         limit=request.limit,
         offset=request.offset,
     )

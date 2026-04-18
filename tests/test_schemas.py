@@ -1,6 +1,7 @@
 from pydantic import ValidationError
 
 from app.models.schemas import (
+    ConversationTurn,
     HardFilters,
     ListingData,
     ListingsResponse,
@@ -18,12 +19,26 @@ def test_query_request_requires_query() -> None:
     assert request.offset == 0
 
 
+def test_query_request_allows_conversation_turns() -> None:
+    request = ListingsQueryRequest(
+        query="make it cheaper",
+        conversation=[
+            ConversationTurn(role="user", content="find a flat in Zurich"),
+            ConversationTurn(role="assistant", content="Previous hard filters: city Zurich"),
+        ],
+    )
+
+    assert len(request.conversation) == 2
+    assert request.conversation[0].role == "user"
+
+
 def test_structured_search_request_allows_explicit_filters() -> None:
     request = ListingsSearchRequest(
         hard_filters=HardFilters(
             city=["Zurich"],
             min_price=1000,
             max_rooms=4.5,
+            min_area_sqm=65,
             features=["balcony", "elevator"],
             latitude=47.0,
             longitude=8.0,
@@ -35,6 +50,7 @@ def test_structured_search_request_allows_explicit_filters() -> None:
     assert request.hard_filters.city == ["Zurich"]
     assert request.hard_filters.min_price == 1000
     assert request.hard_filters.max_rooms == 4.5
+    assert request.hard_filters.min_area_sqm == 65
     assert request.hard_filters.features == ["balcony", "elevator"]
     assert request.hard_filters.latitude == 47.0
     assert request.hard_filters.longitude == 8.0

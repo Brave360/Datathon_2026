@@ -9,7 +9,7 @@ from typing import Any
 import anthropic
 
 from app.config import get_settings
-from app.models.schemas import HardFilters
+from app.models.schemas import ConversationTurn, HardFilters
 
 LOGGER = logging.getLogger(__name__)
 
@@ -25,6 +25,8 @@ Use exactly these keys:
 - max_price: integer or null
 - min_rooms: number or null
 - max_rooms: number or null
+- min_area_sqm: number or null
+- max_area_sqm: number or null
 - latitude: number or null
 - longitude: number or null
 - radius_km: number or null
@@ -48,13 +50,19 @@ Rules:
 """.strip()
 
 
-def extract_hard_facts(query: str) -> HardFilters:
+def extract_hard_facts(
+    query: str,
+    *,
+    conversation: list[ConversationTurn] | None = None,
+) -> HardFilters:
     settings = get_settings()
+    conversation = conversation or []
     if not settings.claude_api_key:
         hard_filters = HardFilters()
         _append_debug_record(
             debug_log_path=settings.hard_facts_debug_log_path,
             query=query,
+            conversation=conversation,
             hard_filters=hard_filters,
             source="fallback_no_api_key",
         )
@@ -63,6 +71,7 @@ def extract_hard_facts(query: str) -> HardFilters:
     try:
         payload = _call_claude_for_hard_filters(
             query=query,
+            conversation=conversation,
             api_key=settings.claude_api_key,
             model=settings.claude_model,
             api_base_url=settings.claude_api_base_url,
@@ -72,6 +81,7 @@ def extract_hard_facts(query: str) -> HardFilters:
         _append_debug_record(
             debug_log_path=settings.hard_facts_debug_log_path,
             query=query,
+            conversation=conversation,
             hard_filters=hard_filters,
             source="claude",
             raw_payload=payload,
@@ -83,6 +93,7 @@ def extract_hard_facts(query: str) -> HardFilters:
         _append_debug_record(
             debug_log_path=settings.hard_facts_debug_log_path,
             query=query,
+            conversation=conversation,
             hard_filters=hard_filters,
             source="fallback_error",
             error=str(exc),
@@ -93,6 +104,7 @@ def extract_hard_facts(query: str) -> HardFilters:
 def _call_claude_for_hard_filters(
     *,
     query: str,
+    conversation: list[ConversationTurn],
     api_key: str,
     model: str,
     api_base_url: str,
@@ -107,14 +119,31 @@ def _call_claude_for_hard_filters(
         model=model,
         max_tokens=400,
         system=SYSTEM_PROMPT,
-        messages=[
-            {
-                "role": "user",
-                "content": f"Query: {query}",
-            }
-        ],
+        messages=_build_messages(conversation=conversation, query=query),
     )
     return _extract_json_payload(message.model_dump())
+
+
+def _build_messages(
+    *,
+    conversation: list[ConversationTurn],
+    query: str,
+) -> list[dict[str, str]]:
+    messages: list[dict[str, str]] = []
+    for turn in conversation:
+        messages.append(
+            {
+                "role": turn.role,
+                "content": turn.content,
+            }
+        )
+    messages.append(
+        {
+            "role": "user",
+            "content": query,
+        }
+    )
+    return messages
 
 
 def _extract_json_payload(data: dict[str, Any]) -> dict[str, Any]:
@@ -151,6 +180,7 @@ def _append_debug_record(
     *,
     debug_log_path: Path,
     query: str,
+    conversation: list[ConversationTurn],
     hard_filters: HardFilters,
     source: str,
     raw_payload: dict[str, Any] | None = None,
@@ -159,6 +189,7 @@ def _append_debug_record(
     record: dict[str, Any] = {
         "timestamp_utc": datetime.now(UTC).isoformat(),
         "query": query,
+        "conversation": [turn.model_dump() for turn in conversation],
         "source": source,
         "hard_filters": hard_filters.model_dump(),
     }
