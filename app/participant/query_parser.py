@@ -90,8 +90,10 @@ Rules:
 2. Soft requirements: the user expresses a preference, wish, or nice-to-have. Listings matching
    more soft requirements rank higher.
 3. If a requirement is ambiguous, place it in soft_requirements.
-4. For points_of_interest: if the user mentions wanting to be near any place — a category, a
-   specific chain, or a named landmark — add an entry.
+4. points_of_interest MUST always go in soft_requirements, never in hard_requirements.
+   Proximity cannot be filtered in the database — it is scored at ranking time.
+   If the user mentions wanting to be near any place — a category, a specific chain, or a
+   named landmark — add an entry to soft_requirements.points_of_interest.
    - Category (generic): set `type` to the category and `query` to "<category> <city>".
      Examples: school → `{"type":"school","query":"primary school Bern","radius_km":0.5}`
                hospital → `{"type":"hospital","query":"hospital Zurich","radius_km":2.0}`
