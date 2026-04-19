@@ -220,45 +220,52 @@ def _numeric_score(
     max_price = soft_facts.get("max_price")
     min_price = soft_facts.get("min_price")
     if price is not None and (max_price is not None or min_price is not None):
-        target = max_price or min_price
+        target = _range_target(min_price, max_price)
         components.append(_gaussian(price, target, scale=max(target * 0.3, 1.0)))
 
     rooms = candidate.get("rooms")
     min_rooms = soft_facts.get("min_rooms")
     max_rooms = soft_facts.get("max_rooms")
     if rooms is not None and (min_rooms is not None or max_rooms is not None):
-        target = min_rooms or max_rooms
+        target = _range_target(min_rooms, max_rooms)
         components.append(_gaussian(rooms, target, scale=2.0))
 
     area = candidate.get("area")
     min_area = soft_facts.get("min_area")
     max_area = soft_facts.get("max_area")
     if area is not None and (min_area is not None or max_area is not None):
-        target = min_area or max_area
+        target = _range_target(min_area, max_area)
         components.append(_gaussian(area, target, scale=max(target * 0.3, 1.0)))
 
     bedrooms = candidate.get("bedrooms")
     min_bedrooms = soft_facts.get("min_bedrooms")
     max_bedrooms = soft_facts.get("max_bedrooms")
     if bedrooms is not None and (min_bedrooms is not None or max_bedrooms is not None):
-        target = min_bedrooms or max_bedrooms
+        target = _range_target(min_bedrooms, max_bedrooms)
         components.append(_gaussian(bedrooms, target, scale=1.5))
 
     bathrooms = candidate.get("bathrooms")
     min_bathrooms = soft_facts.get("min_bathrooms")
     max_bathrooms = soft_facts.get("max_bathrooms")
     if bathrooms is not None and (min_bathrooms is not None or max_bathrooms is not None):
-        target = min_bathrooms or max_bathrooms
+        target = _range_target(min_bathrooms, max_bathrooms)
         components.append(_gaussian(bathrooms, target, scale=1.0))
 
     year_built = candidate.get("year_built")
     min_year_built = soft_facts.get("min_year_built")
     max_year_built = soft_facts.get("max_year_built")
     if year_built is not None and (min_year_built is not None or max_year_built is not None):
-        target = min_year_built or max_year_built
+        target = _range_target(min_year_built, max_year_built)
         components.append(_gaussian(year_built, target, scale=25.0))
 
     return sum(components) / len(components) if components else 1.0
+
+
+def _range_target(lo: float | None, hi: float | None) -> float:
+    """Midpoint when both bounds are set; otherwise whichever bound exists."""
+    if lo is not None and hi is not None:
+        return (lo + hi) / 2
+    return lo if lo is not None else hi  # type: ignore[return-value]
 
 
 def _gaussian(value: float, target: float, scale: float) -> float:
