@@ -1,15 +1,14 @@
 # Swiss Real Estate Search — Datathon 2026
 
+AI-powered real estate search for the Swiss market. Natural-language queries are parsed into hard filters and soft preferences by Claude Opus, candidates are retrieved from a SQLite database, and results are ranked by a multi-signal scorer combining semantic text embeddings, image embeddings, proximity to point-of-interests (POIs), feature matching, and numeric preferences.
+
+## Main Links
+
 **[Demo video](https://drive.google.com/file/d/1oHXUQN5mF1ih4IcYYAJVZHC4teNaRtvP/view)**
 
 **[Presentation Slides](https://docs.google.com/presentation/d/1V3BpoiJe4ESz5ecc_jqpSxRZQBgF6F2WW8s0EE6VQkA/edit?usp=sharing)**
 
 **[Architecture Slides](https://docs.google.com/presentation/d/1KTc2zfTIAWuATa220BIaZeMsnEO0YmU3Hva5TVs5SMM/edit?usp=sharing)**
-
-
-AI-powered real estate search for the Swiss market. Natural-language queries are parsed into hard filters and soft preferences by Claude Opus, candidates are retrieved from a SQLite database, and results are ranked by a multi-signal scorer combining semantic text embeddings, image embeddings, POI proximity, feature matching, and numeric preferences.
-
----
 
 ## Architecture
 
