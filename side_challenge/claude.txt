@@ -1,6 +1,6 @@
 ANTHROPIC SIDE CHALLENGE SUBMISSION
 ====================================
-Team: Brave360
+Team: Everythingisnormal
 Repository: https://github.com/Brave360/Datathon_2026
 
 
