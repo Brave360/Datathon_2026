@@ -180,5 +180,5 @@ KEY FILES
 
   app/participant/query_parser.py         NL -> hard + soft requirements (Opus)
   app/participant/soft_fact_extraction.py Preference + POI extraction (Opus)
-  app/participant/hard_fact_extraction.py Hard constraint extraction (Opus)
+  app/participant/hard_fact_extraction.py Hard constraint extraction (Sonnet)
   scripts/enrich_csvs.py                  Bulk enrichment via Batch API (Haiku)
