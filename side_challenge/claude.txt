@@ -1,0 +1,184 @@
+ANTHROPIC SIDE CHALLENGE SUBMISSION
+====================================
+Team: Brave360
+Repository: https://github.com/Brave360/Datathon_2026
+
+
+OVERVIEW
+--------
+Claude is not a feature we bolted on — it is the intelligence layer of our entire
+system. Without it, we have a keyword search. With it, we have a conversational
+real estate agent that understands Swiss German, reads between the lines, enriched
+tens of thousands of listings offline, and routes every query through a dual-model
+pipeline optimized for both quality and cost.
+
+We used two distinct Claude models across four separate integration points,
+touching every stage of the product: offline data enrichment, query understanding,
+preference extraction, and multi-turn conversation.
+
+
+─────────────────────────────────────────────────────────────────────────────────
+1. OFFLINE LISTING ENRICHMENT — Claude Haiku + Batch API
+   scripts/enrich_csvs.py
+─────────────────────────────────────────────────────────────────────────────────
+
+The raw listing data arrived with features buried in free-text descriptions written
+in German, French, Italian, and English. No structured field told us whether a flat
+had a balcony, when it was built, or whether pets were allowed. We solved this at
+scale using the Anthropic Message Batches API.
+
+Model: claude-haiku-4-5-20251001 (fastest, cheapest — right tool for bulk extraction)
+
+What we extract per listing (14 fields):
+  Scalar:  available_from, floor, year_built, last_renovation,
+           number_of_bedrooms, number_of_bathrooms
+  Boolean: elevator, balcony, parking, garage, fireplace,
+           child_friendly, pets_allowed, washing_machine
+
+Why the Batch API specifically:
+  - 50% cost reduction vs synchronous calls
+  - 25 listings per batch request, all CSVs submitted in one API call
+  - Resume-safe: batch ID saved to .enrichment_batch_id — re-running polls
+    the existing batch rather than resubmitting, so a crash never costs double
+  - Failed batches logged to failed_batches.jsonl for recovery
+
+The system prompt is a multilingual Swiss real estate domain expert with explicit
+null-handling rules: "return null for any field not explicitly mentioned in the
+text." This prevents hallucination of missing data — a critical requirement for
+a search system where false positives destroy trust.
+
+Stage 0 (free, no API call): before touching the Batch API, we parse COMPARIS's
+structured orig_data JSON directly, resolving ~214 field mappings for free. Haiku
+only processes what structured parsing cannot handle.
+
+
+─────────────────────────────────────────────────────────────────────────────────
+2. NATURAL LANGUAGE QUERY PARSING — Claude Opus + Tool Use
+   app/participant/query_parser.py
+─────────────────────────────────────────────────────────────────────────────────
+
+Model: claude-opus-4-7 (best reasoning — accuracy matters more than speed here)
+
+Every user query goes through Claude Opus with a tool use call that forces
+structured JSON output. We defined a custom tool — parse_requirements — whose
+input schema encodes the full database schema as a constraint:
+
+  parse_requirements(
+    hard_requirements: Requirements,   # non-negotiable → SQL WHERE clauses
+    soft_requirements: Requirements    # preferences → ranking signals
+  )
+
+The tool schema enforces enum constraints (offer_type in {RENT, BUY},
+object_category in {APARTMENT, HOUSE, STUDIO, ...}), preventing invalid SQL.
+
+Key design decisions driven by Claude's capabilities:
+
+  Hard vs Soft separation: Claude is instructed with explicit rules for what
+  constitutes a hard requirement ("must", "only", "maximum") vs a preference.
+  Ambiguous cases default to soft. This maps directly to whether a constraint
+  filters listings out or just scores them lower.
+
+  POI routing: Points of Interest (schools, lakes, hospitals, transit) always
+  go to soft_requirements — never hard. Claude understands that proximity cannot
+  be SQL-filtered and must be scored at ranking time. This architectural decision
+  (Claude routes POIs to the ranker, not the filter) is enforced in the system
+  prompt and validated in the tool schema.
+
+  Multi-turn conversation: The full conversation history is passed with every
+  call. Claude handles query refinement natively — "make it cheaper" preserves
+  city and features while adjusting budget; "actually Winterthur" replaces only
+  the city. No custom diffing logic needed — Claude does it.
+
+  Prompt caching: System prompt and tool schema are cached with Anthropic's
+  ephemeral cache, reducing input token cost on repeated queries.
+
+
+─────────────────────────────────────────────────────────────────────────────────
+3. SOFT PREFERENCE EXTRACTION — Claude Opus + Tool Use
+   app/participant/soft_fact_extraction.py
+─────────────────────────────────────────────────────────────────────────────────
+
+Model: claude-opus-4-7
+
+A second Claude call extracts nuanced, non-filterable preferences that inform
+ranking. The extract_soft_requirements tool schema covers 18 fields including:
+
+  Lifestyle signals:   brightness, is_quiet, has_view, has_outdoor_space,
+                       near_nature, near_lake, central_location
+  Demographic signals: family_friendly, student_friendly
+  POI proximity:       array of {poi, poi_type, max_minutes, transport_mode}
+    — Claude infers reasonable defaults when not specified
+    — poi_type enum: school, university, hospital, public_transport,
+      shop, park, lake, nature, kindergarten, named_place, other
+  Neighborhood vibes:  free-form English descriptors extracted from any language
+                       ("lively", "trendy", "safe", "residential")
+  Numeric soft targets: preferred_rooms, preferred_area_sqm — distinct from
+                        hard min/max filters, used for Gaussian decay scoring
+
+Swiss market awareness is baked into the system prompt: "ruhig" maps to
+is_quiet, "hell" maps to brightness, "Seenähe" maps to near_lake.
+
+
+─────────────────────────────────────────────────────────────────────────────────
+4. DUAL-MODEL ARCHITECTURE — The Cost/Quality Split
+─────────────────────────────────────────────────────────────────────────────────
+
+We made a deliberate architectural choice to use two different Claude models
+based on the quality/cost tradeoff at each stage:
+
+  Claude Opus 4.7  → Query parsing and soft preference extraction.
+                     Reasoning-heavy NLU where a wrong parse loses the user.
+                     Called once per user query; latency is acceptable.
+
+  Claude Haiku 4.5 → Bulk listing enrichment across tens of thousands of rows.
+                     Speed and cost dominate; the task is repetitive and
+                     structured. Batch API adds another 50% discount on top.
+
+This is not accidental. It reflects a real production engineering decision:
+use the best model where quality is the bottleneck, use the fastest model
+where throughput is the bottleneck.
+
+
+─────────────────────────────────────────────────────────────────────────────────
+5. WHAT THE SYSTEM LOOKS LIKE WITHOUT CLAUDE
+─────────────────────────────────────────────────────────────────────────────────
+
+Without Claude:
+  - Listings have no amenity flags (no balcony, elevator, furnished detection)
+  - Queries are keyword-matched against raw text
+  - "Close to ETH and quiet" returns nothing useful
+  - Multi-turn refinement requires custom parsing logic
+  - French and Italian queries fail entirely
+  - POI proximity scoring has no structured input to work from
+
+With Claude:
+  - Every listing has 14 enriched fields extracted from multilingual free text
+  - Natural language maps to structured SQL filters with hard/soft separation
+  - POIs are geocoded and distance-ranked with Gaussian decay
+  - Conversation state is preserved and refined across turns
+  - The system understands Swiss-specific signals across 4 languages
+
+
+─────────────────────────────────────────────────────────────────────────────────
+ANTHROPIC API FEATURES USED
+─────────────────────────────────────────────────────────────────────────────────
+
+  [x] Claude Opus 4.7              — query parsing and preference extraction
+  [x] Claude Haiku 4.5             — bulk offline feature extraction
+  [x] Tool Use / Structured Output — parse_requirements, extract_soft_requirements
+  [x] Message Batches API          — offline enrichment at 50% cost
+  [x] Prompt Caching (ephemeral)   — system prompts and tool schemas cached
+  [x] Multi-turn conversations     — full history passed for query refinement
+  [x] Multilingual prompting       — DE / FR / IT / EN in a single system prompt
+  [x] Null-safe extraction rules   — explicit prompt engineering to prevent
+                                     hallucination of missing data
+
+
+─────────────────────────────────────────────────────────────────────────────────
+KEY FILES
+─────────────────────────────────────────────────────────────────────────────────
+
+  app/participant/query_parser.py         NL -> hard + soft requirements (Opus)
+  app/participant/soft_fact_extraction.py Preference + POI extraction (Opus)
+  app/participant/hard_fact_extraction.py Hard constraint extraction (Opus)
+  scripts/enrich_csvs.py                  Bulk enrichment via Batch API (Haiku)
