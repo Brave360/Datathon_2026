@@ -1,0 +1,141 @@
+AWS SIDE CHALLENGE SUBMISSION
+==============================
+Team: Brave360
+Repository: https://github.com/Brave360/Datathon_2026
+
+
+OVERVIEW
+--------
+AWS is not a convenience layer in our architecture — it is the compute and search
+backbone of the entire ranking pipeline. We deployed the full application on EC2,
+stored listing images on S3, ran semantic embedding inference through Amazon Bedrock,
+and indexed the entire listing corpus in Amazon OpenSearch Serverless for real-time
+KNN vector search. Every search query hits AWS infrastructure.
+
+
+─────────────────────────────────────────────────────────────────────────────────
+1. PRODUCTION DEPLOYMENT — Docker on EC2
+─────────────────────────────────────────────────────────────────────────────────
+
+The full application stack runs as Docker containers on an EC2 instance:
+
+  - FastAPI search service          (port 8000)
+  - MCP bridge for Claude Desktop   (port 8001)
+  - React frontend widget           (port 8081)
+
+Docker Compose handles orchestration. The SQLite database is mounted as a named
+volume and bootstrapped from raw CSVs on first startup. The same Docker Compose
+setup runs identically locally and in production — no environment-specific code,
+no configuration drift.
+
+
+─────────────────────────────────────────────────────────────────────────────────
+2. SEMANTIC TEXT SEARCH — Amazon Bedrock + OpenSearch Serverless
+   app/participant/soft_filtering.py
+─────────────────────────────────────────────────────────────────────────────────
+
+Model: amazon.titan-embed-text-v2:0
+Dimensions: 256 (chosen for balance between accuracy and index size)
+Index: "description" in Amazon OpenSearch Serverless
+
+Every user query is embedded at search time via Amazon Bedrock:
+
+  body = json.dumps({"inputText": text[:8000], "dimensions": 256, "normalize": True})
+  response = _bedrock.invoke_model(modelId="amazon.titan-embed-text-v2:0", body=body)
+
+The resulting vector is used for a KNN search (k=250) against the OpenSearch
+"description" index, which holds pre-computed Titan embeddings for every listing's
+title and description. Cosine similarity scores feed directly into the ranker.
+
+Authentication uses AWS4Auth with SigV4 request signing — the OpenSearch Serverless
+endpoint enforces IAM-based access, not API keys.
+
+  OPENSEARCH_ENDPOINT = "https://rwjzlgc3jmnsm1knq1w2.us-west-2.aoss.amazonaws.com"
+
+
+─────────────────────────────────────────────────────────────────────────────────
+3. SEMANTIC IMAGE SEARCH — Amazon Titan Multimodal Embeddings
+   app/participant/soft_filtering.py
+─────────────────────────────────────────────────────────────────────────────────
+
+Model: amazon.titan-embed-image-v1
+Dimensions: 256
+Index: "images" in Amazon OpenSearch Serverless
+
+This is the most novel part of our AWS integration. We embed listing photos using
+Amazon Titan's multimodal model, then at query time embed the user's text query
+into the same image embedding space and run KNN against the image index:
+
+  body = json.dumps({
+      "inputText": text[:512],
+      "embeddingConfig": {"outputEmbeddingLength": 256},
+  })
+  response = _bedrock.invoke_model(modelId="amazon.titan-embed-image-v1", body=body)
+
+This means a query like "bright apartment with mountain view" retrieves listings
+whose photos visually match — not just whose text mentions those words.
+The image score contributes 7% of the final ranking, and rebalances to 0%
+automatically when images are unavailable for a listing.
+
+
+─────────────────────────────────────────────────────────────────────────────────
+4. IMAGE STORAGE — Amazon S3
+   app/core/s3.py
+─────────────────────────────────────────────────────────────────────────────────
+
+Listing images from COMPARIS and ROBINREAL are stored in S3 under a structured
+prefix layout:
+
+  s3://{bucket}/{prefix}/{source}/images/platform_id={platform_id}/
+
+At query time, image URLs are resolved by listing_id via boto3 list_objects_v2,
+then returned as HTTPS S3 URLs in the API response for the frontend to render.
+
+  client = boto3.client("s3", region_name=settings.s3_region)
+  response = client.list_objects_v2(Bucket=settings.s3_bucket, Prefix=prefix)
+
+
+─────────────────────────────────────────────────────────────────────────────────
+5. MULTI-SIGNAL RANKER — AWS as the Semantic Backbone
+   app/participant/ranking.py
+─────────────────────────────────────────────────────────────────────────────────
+
+The ranker combines 5 signals, two of which are powered entirely by AWS:
+
+  Signal             Weight   Powered by
+  ──────────────────────────────────────────────────────────────────────────────
+  Text (semantic)      25%    Bedrock Titan text embed + OpenSearch KNN
+  POI proximity        35%    Nominatim geocoding + Gaussian decay
+  Feature match        20%    Boolean overlap
+  Numeric preferences  15%    Gaussian decay (price, rooms, area)
+  Image (semantic)      7%    Bedrock Titan image embed + OpenSearch KNN
+  ──────────────────────────────────────────────────────────────────────────────
+
+Weights rebalance automatically when a signal is absent. The system also degrades
+gracefully: if AWS credentials are missing or Bedrock is unreachable, the ranker
+falls back to keyword matching without breaking the API. AWS enhances but never
+blocks the core search flow.
+
+
+─────────────────────────────────────────────────────────────────────────────────
+AWS SERVICES USED
+─────────────────────────────────────────────────────────────────────────────────
+
+  [x] Amazon EC2                    — production deployment of the full Docker stack
+  [x] Amazon S3                     — listing image storage and URL resolution
+  [x] Amazon Bedrock                — model inference (no GPU management)
+  [x] Titan Embed Text v2           — 256-dim text embeddings for semantic search
+  [x] Titan Embed Image v1          — multimodal embeddings for image search
+  [x] OpenSearch Serverless         — KNN vector index for text + image retrieval
+  [x] AWS4Auth / SigV4              — IAM-signed requests to OpenSearch
+
+
+─────────────────────────────────────────────────────────────────────────────────
+KEY FILES
+─────────────────────────────────────────────────────────────────────────────────
+
+  app/participant/soft_filtering.py   Bedrock inference + OpenSearch KNN search
+  app/participant/ranking.py          Multi-signal ranker, AWS integration point
+  app/core/s3.py                      S3 image URL resolution via boto3
+  docker-compose.yml                  Full stack deployment definition
+  Dockerfile                          API container (runs on EC2)
