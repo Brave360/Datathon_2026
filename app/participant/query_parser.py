@@ -210,7 +210,7 @@ def parse_query(
         max_tokens=2048,
         system=_SYSTEM_PROMPT,
         tools=[_TOOL],
-        tool_choice={"type": "auto"},
+        tool_choice={"type": "tool", "name": "parse_requirements"},
         messages=_build_messages(query=query, conversation=conversation),
     )
     tool_block = next(b for b in response.content if b.type == "tool_use")

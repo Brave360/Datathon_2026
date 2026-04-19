@@ -23,9 +23,13 @@ CLAUDE.md
 
 start_all.ps1
 
+# Diagrams
+architecture_diagram.svg
+
 # Dev artifacts
 .claude/
 failed_batches.jsonl
+presentation/
 raw_data/__MACOSX/
 raw_data/*.tmp
 raw_data/sred_images/
