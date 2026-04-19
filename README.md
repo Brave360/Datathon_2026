@@ -2,6 +2,11 @@
 
 **[Demo video](https://drive.google.com/file/d/1oHXUQN5mF1ih4IcYYAJVZHC4teNaRtvP/view)**
 
+**[Presentation Slides](https://docs.google.com/presentation/d/1V3BpoiJe4ESz5ecc_jqpSxRZQBgF6F2WW8s0EE6VQkA/edit?usp=sharing)**
+
+**[Architecture Slides](https://docs.google.com/presentation/d/1KTc2zfTIAWuATa220BIaZeMsnEO0YmU3Hva5TVs5SMM/edit?usp=sharing)**
+
+
 AI-powered real estate search for the Swiss market. Natural-language queries are parsed into hard filters and soft preferences by Claude Opus, candidates are retrieved from a SQLite database, and results are ranked by a multi-signal scorer combining semantic text embeddings, image embeddings, POI proximity, feature matching, and numeric preferences.
 
 ---
@@ -22,16 +27,16 @@ User query (natural language)
 │  Hard Filter      │  SQLite WHERE clauses (city, price, rooms, features…)
 │  hard_filter.py   │  Auto-relaxation when < 5 results
 └────────┬──────────┘
-         │ candidate listings (≤ 200)
+         │ candidate listings
          ▼
 ┌───────────────────────────────────────────────┐
 │  Multi-Signal Ranker   ranking.py             │
 │                                               │
-│  • Text score      (25%)  Amazon Titan embed  │
-│  • POI proximity   (35%)  Nominatim + Gauss   │
+│  • Text score      (25%)  Bedrock/Open Search │
+│  • POI proximity   (35%)  Nominatim/OSM       │
 │  • Feature match   (20%)  boolean overlap     │
 │  • Numeric prefs   (15%)  Gaussian decay      │
-│  • Image embed      (7%)  Titan vision        │
+│  • Image embed      (7%)  Bedrock/Open Search │
 │                                               │
 │  Weights rebalance automatically when a       │
 │  signal is absent (no images, no POIs…)       │
