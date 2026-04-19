@@ -56,6 +56,8 @@ Raw CSVs from COMPARIS and SRED are enriched before being loaded into SQLite:
 | `scripts/enrich_locations_from_geo.py` | Reverse-geocodes SRED listings: GPS coordinates → street, city, postal code, canton via Nominatim |
 | `scripts/fill_canton_from_zip.py` | Forward-geocodes missing cantons from postal codes |
 | `scripts/add_is_furnished.py` | Classifies furnished / unfurnished / unknown using priority-ordered text patterns across 4 languages |
+| `scripts/embed_listings.py` | Embeds listing titles and descriptions using **Titan Text v2** (256-dim) and indexes them into the OpenSearch `description` kNN index |
+| `scripts/embed_images.py` | Downloads listing images from S3, embeds them using **Titan Multimodal v1** (256-dim), and indexes them into the OpenSearch `images` kNN index |
 
 ---
 
