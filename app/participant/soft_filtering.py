@@ -7,8 +7,12 @@ from typing import Any
 import boto3
 from geopy.distance import geodesic
 from geopy.geocoders import Nominatim
-from opensearchpy import OpenSearch, RequestsHttpConnection
-from requests_aws4auth import AWS4Auth
+try:
+    from opensearchpy import OpenSearch, RequestsHttpConnection
+    from requests_aws4auth import AWS4Auth
+    _OPENSEARCH_AVAILABLE = True
+except ImportError:
+    _OPENSEARCH_AVAILABLE = False
 
 # ── Semantic Score ───────────────────────────────────────────────
 
@@ -23,28 +27,39 @@ IMAGE_EMBEDDING_DIMS = 256
 OPENSEARCH_ENDPOINT = "https://rwjzlgc3jmnsm1knq1w2.us-west-2.aoss.amazonaws.com"
 AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "us-west-2")
 
-_session = boto3.Session()
-_credentials = _session.get_credentials().get_frozen_credentials()
-_awsauth = AWS4Auth(
-    _credentials.access_key,
-    _credentials.secret_key,
-    AWS_REGION,
-    "aoss",
-    session_token=_credentials.token,
-)
-_bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION)
-_os_client = OpenSearch(
-    hosts=[{"host": OPENSEARCH_ENDPOINT.removeprefix("https://"), "port": 443}],
-    http_auth=_awsauth,
-    use_ssl=True,
-    verify_certs=True,
-    connection_class=RequestsHttpConnection,
-    timeout=30,
-)
+_bedrock = None
+_os_client = None
+_AWS_AVAILABLE = False
+
+if _OPENSEARCH_AVAILABLE:
+    try:
+        _session = boto3.Session()
+        _creds = _session.get_credentials()
+        if _creds is not None:
+            _frozen = _creds.get_frozen_credentials()
+            _awsauth = AWS4Auth(
+                _frozen.access_key,
+                _frozen.secret_key,
+                AWS_REGION,
+                "aoss",
+                session_token=_frozen.token,
+            )
+            _bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+            _os_client = OpenSearch(
+                hosts=[{"host": OPENSEARCH_ENDPOINT.removeprefix("https://"), "port": 443}],
+                http_auth=_awsauth,
+                use_ssl=True,
+                verify_certs=True,
+                connection_class=RequestsHttpConnection,
+                timeout=30,
+            )
+            _AWS_AVAILABLE = True
+    except Exception:
+        pass
 
 def _embed(text: str) -> list[float]:
     body = json.dumps({"inputText": text[:8000], "dimensions": EMBEDDING_DIMS, "normalize": True})
-    response = _bedrock.invoke_model(modelId=EMBEDDING_MODEL_ID, body=body)
+    response = _bedrock.invoke_model(modelId=EMBEDDING_MODEL_ID, body=body)  # type: ignore[union-attr]
     return json.loads(response["body"].read())["embedding"]
 
 
@@ -53,11 +68,13 @@ def _embed_text_as_image(text: str) -> list[float]:
         "inputText": text[:512],
         "embeddingConfig": {"outputEmbeddingLength": IMAGE_EMBEDDING_DIMS},
     })
-    response = _bedrock.invoke_model(modelId=IMAGE_EMBEDDING_MODEL_ID, body=body)
+    response = _bedrock.invoke_model(modelId=IMAGE_EMBEDDING_MODEL_ID, body=body)  # type: ignore[union-attr]
     return json.loads(response["body"].read())["embedding"]
 
 def semantic_score_desc(query: str, candidates: list[dict]) -> dict[str, float]:
     """Returns a mapping of listing_id -> semantic similarity score for each candidate."""
+    if not _AWS_AVAILABLE:
+        return {}
     K = 250
     query_vector = _embed(query)
     response = _os_client.search(
@@ -82,6 +99,8 @@ def semantic_score_desc(query: str, candidates: list[dict]) -> dict[str, float]:
 
 def semantic_score_images(query: str, candidates: list[dict]) -> dict[str, float]:
     """Returns a mapping of listing_id -> image similarity score for each candidate."""
+    if not _AWS_AVAILABLE:
+        return {}
     K = 250
     query_vector = _embed_text_as_image(query)
     response = _os_client.search(
@@ -150,18 +169,19 @@ def filter_soft_facts(
     if len(candidates) == 0:
         return candidates
         
-    ids_to_candidate = {c['listing_id']: c for c in candidates}
-    raw_query = soft_facts['raw_query']
-    embedding_scores = semantic_score_desc(raw_query, candidates)
-    best_listing_ids = sorted(embedding_scores, key=embedding_scores.get, reverse=True)[:5]
-    print("Len candidates", len(candidates))
-    for i, listing_id in enumerate(best_listing_ids, 1):
-        candidate = ids_to_candidate[listing_id]
-        score = embedding_scores.get(listing_id, 0.0)
-        print(f"#{i} [{listing_id}] {candidate['title']} (score: {score:.4f})")
-        print(f"    {candidate['city']} | {candidate['price']} CHF | {candidate['rooms']} rooms")
-        print(f"    {candidate['description'] or ''}")
-        print()
+    if _AWS_AVAILABLE:
+        ids_to_candidate = {c['listing_id']: c for c in candidates}
+        raw_query = soft_facts.get('raw_query', '')
+        embedding_scores = semantic_score_desc(raw_query, candidates)
+        best_listing_ids = sorted(embedding_scores, key=embedding_scores.get, reverse=True)[:5]
+        print("Len candidates", len(candidates))
+        for i, listing_id in enumerate(best_listing_ids, 1):
+            candidate = ids_to_candidate[listing_id]
+            score = embedding_scores.get(listing_id, 0.0)
+            print(f"#{i} [{listing_id}] {candidate['title']} (score: {score:.4f})")
+            print(f"    {candidate['city']} | {candidate['price']} CHF | {candidate['rooms']} rooms")
+            print(f"    {candidate['description'] or ''}")
+            print()
         
         
     # if soft_facts.get("Close to"):
