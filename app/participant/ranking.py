@@ -40,19 +40,27 @@ _STOP_WORDS = {
     "les", "le", "la", "de", "du", "et", "un", "une", "pour", "avec",
 }
 
-# Attempt to load AWS semantic search; falls back to keyword matching if unavailable
+# AWS semantic search (requires AWS credentials + OpenSearch)
 try:
+    from app.participant.soft_filtering import _AWS_AVAILABLE as _HAS_AWS_SEMANTIC
     from app.participant.soft_filtering import semantic_score_desc as _aws_semantic_score
     from app.participant.soft_filtering import semantic_score_images as _aws_image_score
-    _HAS_SEMANTIC = True
-    LOGGER.info("AWS semantic search loaded successfully")
-except Exception as _e:
+except Exception:
+    _HAS_AWS_SEMANTIC = False
     _aws_semantic_score = None  # type: ignore[assignment]
     _aws_image_score = None  # type: ignore[assignment]
-    _HAS_SEMANTIC = False
-    LOGGER.info("AWS semantic search unavailable (%s), using keyword fallback", _e)
 
-HAS_IMAGE_SCORING = _HAS_SEMANTIC
+# Local semantic search (sentence-transformers + ChromaDB); no AWS needed
+try:
+    from app.participant.local_embeddings import semantic_score_local as _local_semantic_score
+    _HAS_LOCAL_SEMANTIC = True
+except ImportError:
+    _local_semantic_score = None  # type: ignore[assignment]
+    _HAS_LOCAL_SEMANTIC = False
+    LOGGER.info("Local semantic search unavailable — install sentence-transformers and chromadb")
+
+_HAS_SEMANTIC = _HAS_AWS_SEMANTIC or _HAS_LOCAL_SEMANTIC
+HAS_IMAGE_SCORING = _HAS_AWS_SEMANTIC
 
 
 def rank_listings(
@@ -99,15 +107,24 @@ def _build_text_scores(
     soft_facts: dict[str, Any],
 ) -> dict[Any, float]:
     """Returns listing_id -> text relevance score [0, 1] for all candidates."""
-    if _HAS_SEMANTIC and query_text:
-        try:
-            raw = _aws_semantic_score(query_text, pool)
-            # Normalize to [0, 1]: divide by the max observed score
-            if raw:
-                max_s = max(raw.values()) or 1.0
-                return {lid: s / max_s for lid, s in raw.items()}
-        except Exception as exc:
-            LOGGER.warning("Semantic scoring failed, falling back to keywords: %s", exc)
+    if query_text:
+        if _HAS_AWS_SEMANTIC:
+            try:
+                raw = _aws_semantic_score(query_text, pool)
+                if raw:
+                    max_s = max(raw.values()) or 1.0
+                    return {lid: s / max_s for lid, s in raw.items()}
+            except Exception as exc:
+                LOGGER.warning("AWS semantic scoring failed: %s", exc)
+
+        if _HAS_LOCAL_SEMANTIC:
+            try:
+                raw = _local_semantic_score(query_text, pool)
+                if raw:
+                    max_s = max(raw.values()) or 1.0
+                    return {lid: s / max_s for lid, s in raw.items()}
+            except Exception as exc:
+                LOGGER.warning("Local semantic scoring failed: %s", exc)
 
     # Keyword fallback
     query_terms = _tokenize(query_text) if query_text else _terms_from_soft(soft_facts)
