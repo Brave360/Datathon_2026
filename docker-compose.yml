@@ -11,8 +11,9 @@ services:
       LISTINGS_RAW_DATA_DIR: /app/raw_data
       LISTINGS_DB_PATH: /data/listings.db
       LISTINGS_ALLOW_ALL_CORS: "true"
+      CHROMA_DB_PATH: /data/chroma
     volumes:
-      - listings_data:/data
+      - ./data:/data
   mcp:
     build:
       context: .
@@ -30,7 +31,7 @@ services:
     depends_on:
       - api
     volumes:
-      - listings_data:/data
+      - ./data:/data
   frontend:
     build:
       context: .
@@ -39,6 +40,3 @@ services:
       - "8081:8080"
     depends_on:
       - api
-
-volumes:
-  listings_data:
