@@ -22,6 +22,7 @@ CLAUDE.md
 .env
 
 start_all.ps1
+startall.ps1
 
 # Diagrams
 architecture_diagram.svg

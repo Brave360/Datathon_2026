@@ -12,7 +12,7 @@ AI-powered real estate search for the Swiss market. Natural-language queries are
 
 **[Architecture Slides](https://docs.google.com/presentation/d/1KTc2zfTIAWuATa220BIaZeMsnEO0YmU3Hva5TVs5SMM/edit?usp=sharing)**
 
-**[Demo (Hosted on EC2)](http://ec2-35-93-119-29.us-west-2.compute.amazonaws.com:8081/)**
+**Demo (EC2 instance closed after the challenge — see demo video above)**
 
 ## Architecture
 
